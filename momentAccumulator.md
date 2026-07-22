@@ -130,7 +130,7 @@ mean, never differencing two independently-large quantities — carries over
 to the higher orders, but there isn't as clean a universal error bound at,
 say, $p=8$. In practice (see `test/runtests.jl`), merging a stream in
 chunks agrees with a whole-batch computation to about 1 part in $10^7$ at
-$p=7$–$p=8$ for data with a mean offset large relative to its spread — plenty
+$p=7$ or $p=8$ for data with a mean offset large relative to its spread — plenty
 for the moments' intended use (`densityQuality`'s comparison against the
 ASH is far coarser than that), but worth knowing it's not the ~15-digit
 agreement you'd get at $p=2$. High-order central moments are just
