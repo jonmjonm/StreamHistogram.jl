@@ -56,15 +56,15 @@ Given two partitions $A$ (count $n_A$, mean $\mu_A$, central moments
 $M_p^A$) and $B$ ($n_B$, $\mu_B$, $M_p^B$), let
 
 $$
-n = n_A + n_B, \qquad \delta = \mu_B - \mu_A, \qquad \mu = \mu_A + \delta\,\frac{n_B}{n}
+n = n_A + n_B, \qquad \delta = \mu_B - \mu_A, \qquad \mu = \mu_A + \delta \frac{n_B}{n}
 $$
 
 Then for each order $p \geq 2$:
 
 $$
 M_p = M_p^A + M_p^B
-    + \sum_{k=1}^{p-2} \binom{p}{k}\left[M_{p-k}^A\left(\frac{-n_B\delta}{n}\right)^{\!k} + M_{p-k}^B\left(\frac{n_A\delta}{n}\right)^{\!k}\right]
-    + \delta^p\, n_A n_B\,\frac{n_A^{\,p-1} - (-n_B)^{p-1}}{n^p}
+    + \sum_{k=1}^{p-2} \binom{p}{k}\left[M_{p-k}^A\left(\frac{-n_B\delta}{n}\right)^k + M_{p-k}^B\left(\frac{n_A\delta}{n}\right)^k\right]
+    + \delta^p n_A n_B \frac{n_A^{p-1} - (-n_B)^{p-1}}{n^p}
 $$
 
 This is implemented generically in `mergeaccumulators` for whatever
@@ -77,15 +77,15 @@ order requested via `momentPowers`.
 For $p = 2$ the sum over $k$ is empty ($k$ ranges over $1..0$), leaving
 
 $$
-M_2 = M_2^A + M_2^B + \delta^2\,\frac{n_A n_B (n_A+n_B)}{n^2}
-    = M_2^A + M_2^B + \delta^2\,\frac{n_A n_B}{n}
+M_2 = M_2^A + M_2^B + \delta^2 \frac{n_A n_B (n_A+n_B)}{n^2}
+    = M_2^A + M_2^B + \delta^2 \frac{n_A n_B}{n}
 $$
 
 which is exactly Chan, Golub & LeVeque's (1979) parallel variance formula.
 
 For $p = 3$, the $k=1$ term gives $\dfrac{3\delta}{n}\left(n_A M_2^B - n_B
 M_2^A\right)$, and the last term simplifies (via $n_A^2 - n_B^2 =
-(n_A-n_B)(n_A+n_B) = (n_A-n_B)\,n$) to $\delta^3 n_A n_B (n_A - n_B)/n^2$ —
+(n_A-n_B)(n_A+n_B) = (n_A-n_B) n$) to $\delta^3 n_A n_B (n_A - n_B)/n^2$ —
 matching the standard combined-skewness formula quoted in the
 online-moments literature. Both reduce correctly, and `mergeaccumulators`
 is order-independent (`merge(merge(A,B),C) == merge(A,merge(B,C))`,
