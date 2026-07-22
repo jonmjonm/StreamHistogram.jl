@@ -128,6 +128,44 @@ end
     @test all(relerrs .< 0.1)
 end
 
+@testset "density(oh) interpolation is exact at ASH grid nodes" begin
+    Random.seed!(19)
+    data = randn(30_000) .* 2.0 .+ 4.0
+
+    oh = StreamHist(binRange=(-6.0, 14.0), binNum=100)
+    add!(oh, data)
+    finalize!(oh)
+
+    d = density(oh)
+    rng, dens = oh.ash.rng, oh.ash.density
+    # at every grid node itself, the interpolant must reproduce the ASH's
+    # own value exactly (not just "close"), since interpolation weight
+    # collapses fully onto that node
+    for i in 1:5:length(rng)
+        @test d(rng[i]) == dens[i]
+    end
+    # and at a true midpoint between two adjacent nodes, exact linear average
+    i = length(rng) ÷ 2
+    mid = (rng[i] + rng[i + 1]) / 2
+    @test d(mid) ≈ (dens[i] + dens[i + 1]) / 2 rtol=1e-12
+end
+
+@testset "density(oh) approximates the known Normal pdf pointwise" begin
+    Random.seed!(20)
+    μ, σ = 3.0, 1.5
+    data = randn(300_000) .* σ .+ μ
+
+    oh = StreamHist(binRange=(μ - 8σ, μ + 8σ), binNum=400, m=10)
+    add!(oh, data)
+    finalize!(oh)
+
+    d = density(oh)
+    truepdf(x) = exp(-((x - μ)^2) / (2σ^2)) / (σ * sqrt(2π))
+    for x in (μ - 2σ, μ - σ, μ, μ + σ, μ + 2σ)
+        @test d(x) ≈ truepdf(x) atol=0.02
+    end
+end
+
 @testset "learn phase loses no points and matches an equivalent binRange run" begin
     Random.seed!(17)
     data = randn(20_000) .* 3 .+ 1.0
