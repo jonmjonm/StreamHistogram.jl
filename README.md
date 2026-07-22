@@ -43,11 +43,16 @@ If you already know the range, skip the learn phase entirely by passing
 `binRange` or `bins` — the range is fixed at construction and every point is
 live from the start.
 
-Points that arrive after the range is fixed and fall outside it are still
-counted (clamped into the outermost bin, `StatsBase.Histogram`'s default
-behavior) — but the exact min/max and moments are always computed from the
-true values regardless, so `densityQuality` can reveal a range that turned
-out to be too narrow even though the binned view itself is lossy out there.
+Points that arrive after the range is fixed and fall outside it are neither
+dropped nor clamped into the outermost bin — clamping would distort the edge
+bins' shape and mask exactly the "range turned out too narrow" signal this
+is meant to help catch. Instead they're tallied separately in
+`outofrange(oh)` (ROOT/HEP-style under/overflow counts), so
+`sum(exactHistogram(oh).weights) + outofrange(oh).underflow +
+outofrange(oh).overflow == nobs(oh)` always holds exactly. The exact min/max
+and moments are always computed from the true values regardless of range, so
+between that, `outofrange`, and `densityQuality`, a too-narrow range is easy
+to spot even though the binned/smoothed views are lossy out there.
 
 ## Integer mode
 
@@ -124,6 +129,8 @@ histogram/moments by up to `ashBatchSize` points.
 - `nobs(oh)` — total number of points ever added.
 - `datarange(oh)` — `(exactMin, exactMax)` over all points ever added (not
   to be confused with the fixed histogram/ASH bin range).
+- `outofrange(oh)` — `(underflow=, overflow=)` counts of points that fell
+  outside the fixed histogram range; see above.
 - `isinitialized(oh)` — whether the range has been fixed yet (`false` while
   still learning).
 

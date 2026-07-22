@@ -11,7 +11,7 @@ import Statistics: mean, std
 import StatsBase: nobs
 
 export StreamHist, add!, finalize!, density, densityQuality, exactHistogram, histogram,
-    moment, moments, nobs, datarange, mean, variance, std, skewness, kurtosis,
+    moment, moments, nobs, datarange, outofrange, mean, variance, std, skewness, kurtosis,
     isinitialized, MomentAccumulator
 
 include("moments.jl")

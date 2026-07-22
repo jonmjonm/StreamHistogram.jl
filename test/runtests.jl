@@ -235,3 +235,5 @@ end
     m = moments(oh)
     @test Set(keys(m)) == Set([1, 2])
 end
+
+include("correctness.jl")

@@ -31,6 +31,15 @@ mutable struct StreamHist
     exactMin::Float64
     exactMax::Float64
 
+    # Points that fell outside the fixed histogram range are not clamped
+    # into the edge bins (that would distort the edge bins' shape and mask
+    # exactly the "range turned out too narrow" signal datarange/
+    # densityQuality exist to surface). Instead they're tallied separately,
+    # ROOT/HEP-style, so sum(exactHistogram(oh).weights) + under + over ==
+    # nobs(oh) always holds exactly.
+    underflowCount::Int
+    overflowCount::Int
+
     finalized::Bool
 end
 
@@ -85,7 +94,7 @@ function StreamHist(;
         integer, momentPowers, learn, Int(learnLength), Float64(paddingPct),
         Int(binNum), closed, kernel, Int(m), Int(ashNGrid), Int(ashBatchSize),
         Float64[], nothing, nothing, Float64[],
-        MomentAccumulator(maxp), Inf, -Inf, false,
+        MomentAccumulator(maxp), Inf, -Inf, 0, 0, false,
     )
 
     if bins !== nothing
@@ -102,6 +111,18 @@ end
 nmoments(oh::StreamHist) = maxpower(oh.moments)
 StatsBase.nobs(oh::StreamHist) = oh.moments.n
 datarange(oh::StreamHist) = (oh.exactMin, oh.exactMax)
+
+"""
+    outofrange(oh)
+
+`(underflow=, overflow=)` counts of points that fell outside the fixed
+histogram range (below/above respectively) and so aren't reflected in
+`exactHistogram(oh)`'s bins. `sum(exactHistogram(oh).weights) +
+outofrange(oh).underflow + outofrange(oh).overflow == nobs(oh)` always holds
+exactly. A large count here means the range picked (by `--learn` or given
+explicitly) turned out to be too narrow for the data actually seen.
+"""
+outofrange(oh::StreamHist) = (underflow=oh.underflowCount, overflow=oh.overflowCount)
 Statistics.mean(oh::StreamHist) = mean(oh.moments)
 variance(oh::StreamHist) = variance(oh.moments)
 Statistics.std(oh::StreamHist) = std(oh.moments)
@@ -196,7 +217,7 @@ function add!(oh::StreamHist, x::Real)
             oh.learnBuffer = nothing
         end
     else
-        push!(oh.hist, x)
+        pushcounted!(oh, x)
         if !oh.integer
             push!(oh.ashPending, x)
             length(oh.ashPending) >= oh.ashBatchSize && flushash!(oh)
@@ -232,9 +253,34 @@ end
 tofloatvec(xs::Vector{Float64}) = xs
 tofloatvec(xs) = collect(Float64, xs)
 
+"""
+    pushcounted!(oh, x)
+
+Like `push!(oh.hist, x)`, but a point outside `oh.hist`'s edges is tallied in
+`oh.underflowCount`/`oh.overflowCount` instead of being silently dropped
+(`StatsBase.Histogram`'s `push!` no-ops on out-of-range points -- it only
+increments `h.weights` after a `checkbounds` check passes). Uses the same
+`binindex` `push!` computes internally, just without discarding
+out-of-bounds results -- so `sum(exactHistogram(oh).weights) +
+outofrange(oh)... == nobs(oh)` always holds exactly, and a range that turns
+out too narrow is visible instead of silently distorting the edge bins.
+"""
+function pushcounted!(oh::StreamHist, x::Real)
+    h = oh.hist
+    idx = StatsBase.binindex(h, x)
+    if idx < 1
+        oh.underflowCount += 1
+    elseif idx > length(h.weights)
+        oh.overflowCount += 1
+    else
+        h.weights[idx] += 1
+    end
+    return oh
+end
+
 function feed!(oh::StreamHist, xs::Vector{Float64})
     for x in xs
-        push!(oh.hist, x)
+        pushcounted!(oh, x)
     end
     if !oh.integer
         # Batches already amortize ash!'s per-call overhead over many
