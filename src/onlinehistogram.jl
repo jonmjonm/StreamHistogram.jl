@@ -1,4 +1,5 @@
 const DEFAULT_MOMENT_POWERS = [1, 2, 4, 8]
+const DEFAULT_BIN_NUM = 50
 
 mutable struct StreamHist
     # config, fixed at construction
@@ -56,16 +57,24 @@ online central moments, all updatable one point or one batch at a time.
 
 - `integer`: data is integer-valued; bins are centered on the integers in the
   observed/given range and the ASH is disabled (`ash(oh) === nothing`).
+  `bins` and a non-default `binNum` conflict with this (edges are always one
+  bin per integer) and raise `ArgumentError`; `closed` is silently
+  overridden to `:left` regardless of what's passed, since that's the only
+  convention under which the one-bin-per-integer edge construction is
+  correct.
 - `momentPowers`: which moment orders to expose via `moment(oh, p)`.
 - `binRange = (lo, hi)`: fix the histogram/ASH range up front.
-- `binNum`: number of traditional-histogram bins (ignored if `bins` given).
+- `binNum`: number of traditional-histogram bins (ignored if `bins` given;
+  not permitted with `integer=true`).
 - `bins`: explicit bin edges for the traditional histogram; overrides
-  `binRange`/`binNum`. The ASH range is taken from `extrema(bins)`.
+  `binRange`/`binNum`. The ASH range is taken from `extrema(bins)`. Not
+  permitted with `integer=true`.
 - `learn`/`learnLength`: if no `bins`/`binRange` is given, the first
   `learnLength` points are buffered, then used to pick a range
   (`extrema(buffer)` padded by `paddingPct` on each side).
 - `closed`, `kernel`, `m`: passed straight through to
-  `StatsBase.Histogram`/`AverageShiftedHistograms.ash`.
+  `StatsBase.Histogram`/`AverageShiftedHistograms.ash` (`closed` is ignored
+  when `integer=true`, see above).
 - `ashBatchSize`: single-point `add!` calls hold their point back from the
   ASH and flush in batches of this size (`ash!` is far cheaper per point
   called on a batch than called once per point); `finalize!` always flushes
@@ -79,7 +88,7 @@ function StreamHist(;
     learnLength::Integer=10_000,
     paddingPct::Real=0.05,
     binRange::Union{Nothing,Tuple{<:Real,<:Real}}=nothing,
-    binNum::Integer=50,
+    binNum::Integer=DEFAULT_BIN_NUM,
     bins::Union{Nothing,AbstractVector{<:Real}}=nothing,
     closed::Symbol=:left,
     kernel=AverageShiftedHistograms.Kernels.biweight,
@@ -87,6 +96,14 @@ function StreamHist(;
     ashNGrid::Integer=500,
     ashBatchSize::Integer=256,
 )
+    if integer
+        bins === nothing || throw(ArgumentError(
+            "`bins` has no effect when `integer=true` (edges are always one bin per integer); " *
+            "pass `binRange` instead, or drop `integer=true`"))
+        binNum == DEFAULT_BIN_NUM || throw(ArgumentError(
+            "`binNum` has no effect when `integer=true` (edges are always one bin per integer)"))
+    end
+
     momentPowers = sort(unique(Int.(momentPowers)))
     maxp = max(1, maximum(momentPowers))
 

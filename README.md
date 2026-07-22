@@ -16,7 +16,44 @@ A `StreamHist` maintains, incrementally and simultaneously:
    (`AverageShiftedHistograms.jl`)
 3. the exact min and max of every point seen
 4. online central moments at a configurable set of orders, computed with a
-   numerically stable, mergeable algorithm (see `momentAccumulator.md`)
+   numerically stable, mergeable algorithm (see
+   [momentAccumulator.md](momentAccumulator.md))
+
+## Trusting the numbers: exact moments, out-of-range counts, density quality
+
+The moment accumulator is computed directly from the raw values as they
+arrive — never from the binned histogram, never from the smoothed ASH — using
+Pébay's mergeable generalization of Welford's algorithm (the full derivation,
+its merge formula, and its precision properties are in
+[momentAccumulator.md](momentAccumulator.md)). That makes it, for practical
+purposes, exact and independent of every lossy choice the other two
+representations have to make (bin width, smoothing bandwidth, range). Which
+is exactly what makes it useful as ground truth to check those other
+representations against:
+
+- **`densityQuality(oh)`** numerically integrates the ASH density against
+  `(x-mean)^p` for each requested power and compares the result to the
+  moment accumulator's value for that same power. A large relative error
+  means the ASH — the thing you'd actually integrate, sample from, or
+  compare to a model — has drifted from the true shape of the data (too wide
+  a smoothing bandwidth, or a range that's clipping the tails), even though
+  nothing about the ASH's own bookkeeping looks obviously wrong.
+- **`outofrange(oh)`** covers the complementary failure mode: points that
+  fall outside the fixed histogram/ASH range entirely. These aren't dropped
+  or clamped into the edge bins (clamping would distort the edge bins' shape
+  and mask the exact thing you're trying to catch) — they're tallied
+  separately as `(underflow=, overflow=)` counts, ROOT/HEP-style, so
+  `sum(exactHistogram(oh).weights) + outofrange(oh).underflow +
+  outofrange(oh).overflow == nobs(oh)` always holds exactly. A nonzero count
+  here is a direct signal that the chosen (or learned) range missed part of
+  the data. The moment accumulator, meanwhile, is never affected by this —
+  it always reflects every point ever added, in range or not, since it never
+  goes through the histogram/ASH's binning in the first place.
+
+Together, `densityQuality` catches a range/bandwidth that's *technically*
+covering the data but misrepresenting its shape, and `outofrange` catches a
+range that's missing data outright — both checked against the same
+independent, exact source of truth.
 
 ## Why both a histogram and an ASH?
 
@@ -63,6 +100,16 @@ centered exactly on the integers in the observed (or given) range, and the
 ASH is disabled (`density`/`histogram`/`densityQuality` are unavailable —
 there's no smoothing to do, and no bandwidth to get wrong, for exact integer
 counts).
+
+`bins` and a non-default `binNum` conflict with this (edges are always one
+bin per integer) and raise `ArgumentError` rather than being silently
+ignored. `closed` is always overridden to `:left`, since that's the only
+convention under which the one-bin-per-integer construction is correct — it
+doesn't error, since unlike `bins`/`binNum` there's no way to accidentally
+lose information by passing it, just no visible effect. The moment
+accumulator is unaffected by `integer` — it's already exact and O(1) per
+point regardless of mode, so there's nothing to gain by treating it
+differently here.
 
 ## Construction options
 

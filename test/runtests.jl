@@ -209,6 +209,13 @@ end
     @test_throws ArgumentError density(oh)
 end
 
+@testset "integer mode rejects conflicting bins/binNum" begin
+    @test_throws ArgumentError StreamHist(integer=true, binRange=(1, 10), bins=[0.5, 5.5, 10.5])
+    @test_throws ArgumentError StreamHist(integer=true, binRange=(1, 10), binNum=99)
+    # binNum at its default is fine (not a conflict)
+    @test StreamHist(integer=true, binRange=(1, 10)) isa StreamHist
+end
+
 @testset "densityQuality on a Gaussian" begin
     oh = StreamHist(binRange=(-6.0, 6.0), binNum=200, momentPowers=[1, 2, 4])
     add!(oh, randn(20_000))
