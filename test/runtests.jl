@@ -69,6 +69,24 @@ end
     end
 end
 
+@testset "specialized addpoint matches general mergeaccumulators" begin
+    xs = randn(400) .* 4 .+ 7.0
+    maxp = 8
+    viaSpecialized = StreamHistogram.MomentAccumulator(maxp)
+    viaGeneral = StreamHistogram.MomentAccumulator(maxp)
+    for x in xs
+        viaSpecialized = StreamHistogram.addpoint(viaSpecialized, x)
+        trivialB = StreamHistogram.MomentAccumulator(1, Float64(x), zeros(Float64, maxp), viaGeneral.binom)
+        viaGeneral = StreamHistogram.mergeaccumulators(viaGeneral, trivialB)
+    end
+
+    @test viaSpecialized.n == viaGeneral.n
+    @test viaSpecialized.mean ≈ viaGeneral.mean rtol=1e-12
+    for p in 2:maxp
+        @test viaSpecialized.M[p] ≈ viaGeneral.M[p] rtol=1e-10
+    end
+end
+
 @testset "StreamHist basic add!/finalize! with binRange given" begin
     oh = StreamHist(binRange=(-5.0, 5.0), binNum=20)
     @test isinitialized(oh)  # initialized immediately since binRange given
