@@ -73,12 +73,29 @@ StreamHist(;
     kernel       = AverageShiftedHistograms.Kernels.biweight,  # ASH kernel
     m            = 5,               # ASH smoothing width
     ashNGrid     = 500,             # resolution of the ASH's internal grid
+    ashBatchSize = 256,             # scalar add!s flush to the ASH in batches this big
 )
 ```
 
 `closed`, `kernel`, and `m` are passed straight through to the underlying
 packages; everything about *where* the bins/range sit is owned by
 `integer`/`learn`/`binRange`/`binNum`/`bins`.
+
+### Why `ashBatchSize`
+
+`AverageShiftedHistograms.ash!` is dramatically cheaper per point when called
+once on a batch than called once per point (its cost is dominated by
+smoothing over the whole grid, not by how many new points it's given) — in a
+one-point-at-a-time streaming benchmark, calling it on a 100k-point batch
+took ~0.0001s total, versus ~0.37s calling it 100k times on single points.
+So a scalar `add!` doesn't call `ash!` immediately: it holds the point in an
+internal buffer and flushes to the ASH once `ashBatchSize` points have
+accumulated. Batch `add!` calls bypass this entirely and go straight to the
+ASH, since they're already batched. `finalize!` always flushes whatever's
+still pending, so nothing is silently missing from the final density — which
+is exactly why `density`/`histogram`/`densityQuality` require `oh` to be
+finalized (see below): between flushes, the ASH can lag behind the
+histogram/moments by up to `ashBatchSize` points.
 
 ## Functions
 
@@ -87,7 +104,9 @@ packages; everything about *where* the bins/range sit is owned by
   range to be fixed now from whatever's in the buffer. Any later `add!`
   un-finalizes `oh` again, requiring another `finalize!` before reading.
 - `density(oh)` — a callable `x -> density(x)`, linearly interpolating the
-  ASH. Errors in integer mode.
+  ASH. Errors in integer mode, and requires `oh` to be finalized (raises
+  `ArgumentError` otherwise) since the ASH can lag behind by up to
+  `ashBatchSize` points until a `finalize!`/flush.
 - `densityQuality(oh)` — for each requested moment power (in the order of
   `oh.momentPowers`), numerically integrates the ASH density against
   `(x-mean)^p` and compares it to the true moment accumulator value; returns

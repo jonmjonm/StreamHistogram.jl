@@ -95,9 +95,52 @@ end
     # add! after finalize un-finalizes
     add!(oh, 0.5)
     @test !oh.finalized
+    @test_throws ArgumentError density(oh)
     finalize!(oh)
     @test oh.finalized
     @test nobs(oh) == 2001
+end
+
+@testset "ASH micro-batching for scalar add!" begin
+    oh = StreamHist(binRange=(-6.0, 6.0), binNum=100, ashBatchSize=50)
+
+    # fewer points than ashBatchSize: nothing flushed to the ASH yet
+    for x in randn(10)
+        add!(oh, x)
+    end
+    @test length(oh.ashPending) == 10
+    @test nobs(oh.ash) == 0
+
+    # crossing ashBatchSize triggers an automatic flush
+    for x in randn(45)
+        add!(oh, x)
+    end
+    @test nobs(oh.ash) >= 50
+    @test length(oh.ashPending) < 50
+
+    # finalize! flushes whatever's left pending, regardless of batch size
+    n_before = nobs(oh)
+    finalize!(oh)
+    @test isempty(oh.ashPending)
+    @test nobs(oh.ash) == n_before
+    @test oh.finalized
+
+    d = density(oh)
+    @test d(0.0) > 0
+end
+
+@testset "density/histogram/densityQuality require finalize!" begin
+    oh = StreamHist(binRange=(-6.0, 6.0), binNum=50)
+    add!(oh, randn(1000))
+    @test !oh.finalized
+    @test_throws ArgumentError density(oh)
+    @test_throws ArgumentError histogram(oh, collect(-6.0:1.0:6.0))
+    @test_throws ArgumentError densityQuality(oh)
+
+    finalize!(oh)
+    @test density(oh)(0.0) > 0
+    @test !isempty(histogram(oh, collect(-6.0:1.0:6.0)).weights)
+    @test !isempty(densityQuality(oh))
 end
 
 @testset "learn phase auto-ranging" begin

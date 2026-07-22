@@ -12,6 +12,7 @@ mutable struct StreamHist
     kernel::Any
     m::Int
     ashNGrid::Int
+    ashBatchSize::Int
 
     # learn-phase buffer; set to nothing once the range has been fixed
     learnBuffer::Union{Vector{Float64},Nothing}
@@ -19,6 +20,12 @@ mutable struct StreamHist
     # live state; both nothing until the range is known
     hist::Union{Histogram,Nothing}
     ash::Union{Ash,Nothing}
+
+    # scalar add! points destined for the ASH, held back and flushed in
+    # batches of ashBatchSize (or on finalize!/a batch add!) -- ash! is
+    # dramatically cheaper per point when called on a batch than called
+    # once per point.
+    ashPending::Vector{Float64}
 
     moments::MomentAccumulator
     exactMin::Float64
@@ -32,7 +39,7 @@ end
                learnLength=10_000, paddingPct=0.05, binRange=nothing,
                binNum=50, bins=nothing, closed=:left,
                kernel=AverageShiftedHistograms.Kernels.biweight, m=5,
-               ashNGrid=500)
+               ashNGrid=500, ashBatchSize=256)
 
 An online histogram: maintains a traditional (`StatsBase.Histogram`)
 histogram, an Average Shifted Histogram density estimate, exact min/max, and
@@ -50,6 +57,11 @@ online central moments, all updatable one point or one batch at a time.
   (`extrema(buffer)` padded by `paddingPct` on each side).
 - `closed`, `kernel`, `m`: passed straight through to
   `StatsBase.Histogram`/`AverageShiftedHistograms.ash`.
+- `ashBatchSize`: single-point `add!` calls hold their point back from the
+  ASH and flush in batches of this size (`ash!` is far cheaper per point
+  called on a batch than called once per point); `finalize!` always flushes
+  whatever is pending. Batch `add!` calls bypass this and go straight to the
+  ASH regardless of size, since they're already batches.
 """
 function StreamHist(;
     integer::Bool=false,
@@ -64,14 +76,15 @@ function StreamHist(;
     kernel=AverageShiftedHistograms.Kernels.biweight,
     m::Integer=5,
     ashNGrid::Integer=500,
+    ashBatchSize::Integer=256,
 )
     momentPowers = sort(unique(Int.(momentPowers)))
     maxp = max(1, maximum(momentPowers))
 
     oh = StreamHist(
         integer, momentPowers, learn, Int(learnLength), Float64(paddingPct),
-        Int(binNum), closed, kernel, Int(m), Int(ashNGrid),
-        Float64[], nothing, nothing,
+        Int(binNum), closed, kernel, Int(m), Int(ashNGrid), Int(ashBatchSize),
+        Float64[], nothing, nothing, Float64[],
         MomentAccumulator(maxp), Inf, -Inf, false,
     )
 
@@ -167,35 +180,77 @@ learn phase it is buffered until `learnLength` points have accumulated, at
 which point the range is fixed and the traditional histogram / ASH are
 initialized from the buffer (plus padding, unless `integer=true`).
 """
-add!(oh::StreamHist, x::Real) = add!(oh, (x,))
-
-function add!(oh::StreamHist, xs)
-    isempty(xs) && return oh
+function add!(oh::StreamHist, x::Real)
+    x = Float64(x)
     oh.finalized = false
 
-    oh.moments = addbatch(oh.moments, collect(Float64, xs))
-    mn, mx = extrema(xs)
-    oh.exactMin = min(oh.exactMin, Float64(mn))
-    oh.exactMax = max(oh.exactMax, Float64(mx))
+    oh.moments = addpoint(oh.moments, x)
+    oh.exactMin = min(oh.exactMin, x)
+    oh.exactMax = max(oh.exactMax, x)
 
     if !isinitialized(oh)
-        append!(oh.learnBuffer, xs)
+        push!(oh.learnBuffer, x)
         if length(oh.learnBuffer) >= oh.learnLength
             initializerange!(oh, learnedrange(oh))
             feed!(oh, oh.learnBuffer)
             oh.learnBuffer = nothing
         end
     else
-        feed!(oh, xs)
+        push!(oh.hist, x)
+        if !oh.integer
+            push!(oh.ashPending, x)
+            length(oh.ashPending) >= oh.ashBatchSize && flushash!(oh)
+        end
     end
     return oh
 end
 
-function feed!(oh::StreamHist, xs)
+function add!(oh::StreamHist, xs)
+    isempty(xs) && return oh
+    oh.finalized = false
+
+    fxs = tofloatvec(xs)
+    oh.moments = addbatch(oh.moments, fxs)
+    mn, mx = extrema(fxs)
+    oh.exactMin = min(oh.exactMin, mn)
+    oh.exactMax = max(oh.exactMax, mx)
+
+    if !isinitialized(oh)
+        append!(oh.learnBuffer, fxs)
+        if length(oh.learnBuffer) >= oh.learnLength
+            initializerange!(oh, learnedrange(oh))
+            feed!(oh, oh.learnBuffer)
+            oh.learnBuffer = nothing
+        end
+    else
+        feed!(oh, fxs)
+    end
+    return oh
+end
+
+# Avoid a full copy when the caller already passed a Vector{Float64}.
+tofloatvec(xs::Vector{Float64}) = xs
+tofloatvec(xs) = collect(Float64, xs)
+
+function feed!(oh::StreamHist, xs::Vector{Float64})
     for x in xs
         push!(oh.hist, x)
     end
-    oh.integer || ash!(oh.ash, collect(Float64, xs))
+    if !oh.integer
+        # Batches already amortize ash!'s per-call overhead over many
+        # points, so they bypass ashPending entirely -- but flush whatever
+        # scalar add!s left pending first, to keep it from accumulating
+        # across mixed scalar/batch usage.
+        flushash!(oh)
+        ash!(oh.ash, xs)
+    end
+    return oh
+end
+
+function flushash!(oh::StreamHist)
+    isempty(oh.ashPending) && return oh
+    ash!(oh.ash, oh.ashPending)
+    empty!(oh.ashPending)
     return oh
 end
 
@@ -212,6 +267,8 @@ function finalize!(oh::StreamHist)
         initializerange!(oh, learnedrange(oh))
         feed!(oh, oh.learnBuffer)
         oh.learnBuffer = nothing
+    else
+        oh.integer || flushash!(oh)
     end
     oh.finalized = true
     return oh
@@ -231,11 +288,15 @@ end
     density(oh)
 
 A callable `x -> density(x)` linearly interpolating the ASH density.
-Unavailable when `integer=true`.
+Unavailable when `integer=true`. Requires `oh` to be finalized (via
+`finalize!(oh)`) -- single-point `add!` calls hold points back from the ASH
+and batch them for efficiency (see `ashBatchSize`), so the ASH is only
+guaranteed current once finalized; any `add!` after that un-finalizes `oh`
+again.
 """
 function density(oh::StreamHist)
     oh.integer && throw(ArgumentError("density(::StreamHist) is unavailable in integer mode"))
-    isinitialized(oh) || throw(ArgumentError("StreamHist range not yet initialized (still learning); call finalize!(oh) first"))
+    oh.finalized || throw(ArgumentError("StreamHist must be finalize!(oh)d before calling density(oh)"))
     rng = oh.ash.rng
     dens = oh.ash.density
     lo, hi = first(rng), last(rng)

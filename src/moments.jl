@@ -22,8 +22,17 @@ function batchaccumulator(xs::AbstractVector{<:Real}, maxp::Integer)
     n == 0 && return MomentAccumulator(maxp)
     μ = sum(x -> Float64(x), xs) / n
     M = zeros(Float64, maxp)
-    @inbounds for p in 2:maxp
-        M[p] = sum(x -> (Float64(x) - μ)^p, xs)
+    # One pass over xs, building every power's deviation d^p from d^(p-1)
+    # (d *= d each step) instead of maxp-1 separate full traversals each
+    # recomputing d^p from scratch via `^`.
+    @inbounds for x in xs
+        d = Float64(x) - μ
+        dp = d * d
+        M[2] += dp
+        for p in 3:maxp
+            dp *= d
+            M[p] += dp
+        end
     end
     return MomentAccumulator(n, μ, M)
 end
