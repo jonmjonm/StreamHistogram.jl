@@ -115,10 +115,17 @@ moments(oh::StreamHist) = Dict(p => centralmoment(oh.moments, p) for p in oh.mom
 
 isinitialized(oh::StreamHist) = oh.hist !== nothing
 
+"""
+    integeredges(lo, hi)
+
+An `Int`-typed range `lo_i:1:(hi_i+1)`, so that with `closed=:left` each bin
+`[k, k+1)` holds exactly one integer value `k` for `k` in `lo_i:hi_i` —
+i.e. one bin per observed integer, no half-integer shifting needed.
+"""
 function integeredges(lo::Real, hi::Real)
     lo_i = floor(Int, lo)
     hi_i = ceil(Int, hi)
-    return (lo_i - 0.5):1:(hi_i + 0.5)
+    return lo_i:1:(hi_i + 1)
 end
 
 function initializerange!(oh::StreamHist, range::Tuple{Float64,Float64}; bins::Union{Nothing,Vector{Float64}}=nothing)

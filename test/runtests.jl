@@ -141,6 +141,10 @@ end
     finalize!(oh)
     h = exactHistogram(oh)
     @test sum(h.weights) == 7
+    @test eltype(h.edges[1]) == Int
+    @test h.edges[1] == 1:1:11
+    @test h.weights[searchsortedlast(1:1:11, 1)] == 2  # two 1's
+    @test h.weights[searchsortedlast(1:1:11, 10)] == 3  # three 10's
     @test_throws ArgumentError density(oh)
 end
 
