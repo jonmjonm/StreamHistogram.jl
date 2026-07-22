@@ -1,5 +1,7 @@
 # StreamHistogram.jl
 
+[![CI](https://github.com/jonmjonm/StreamHistogram.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/jonmjonm/StreamHistogram.jl/actions/workflows/CI.yml)
+
 `StreamHistogram` collects a histogram — and the statistics needed to judge
 how much to trust it — from data arriving online, one point or one batch at
 a time. It's meant for the case where you don't have all the data up front
@@ -153,6 +155,7 @@ finalize!(oh)
 
 mean(oh), variance(oh), skewness(oh)
 exactHistogram(oh)
+outofrange(oh)  # (underflow=, overflow=) -- check this if the learned range looks too narrow
 d = density(oh)
 densityQuality(oh)
 ```
