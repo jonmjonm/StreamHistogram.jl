@@ -254,6 +254,24 @@ end
     @test_throws ArgumentError add!(oh2, collect(1:20))
 end
 
+@testset "integer=:auto resolves in finalize! when the learn buffer never fills" begin
+    # learnLength is never reached via add!, so resolution can only happen in
+    # finalize!'s early buffer-flush path.
+    oh = StreamHist(integer=:auto, learnLength=1000)
+    add!(oh, collect(1:10))
+    @test oh.integerAuto              # not yet resolved
+    finalize!(oh)
+    @test oh.integer
+    @test !oh.integerAuto
+    @test eltype(exactHistogram(oh).edges[1]) == Int
+
+    oh2 = StreamHist(integer=:auto, learnLength=1000)
+    add!(oh2, [collect(1:9); 3.5])
+    finalize!(oh2)
+    @test !oh2.integer
+    @test density(oh2) isa Function
+end
+
 @testset "integer=:auto requires learn=true and rejects bins/binRange" begin
     @test_throws ArgumentError StreamHist(integer=:auto, binRange=(1, 10))
     @test_throws ArgumentError StreamHist(integer=:auto, bins=[0.5, 5.5, 10.5])

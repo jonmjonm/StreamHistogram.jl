@@ -367,6 +367,7 @@ whatever is in the buffer. Any subsequent `add!` un-finalizes `oh` again.
 function finalize!(oh::StreamHist)
     if !isinitialized(oh)
         isempty(oh.learnBuffer) && throw(ArgumentError("cannot finalize an empty StreamHist"))
+        resolveintegerauto!(oh)
         initializerange!(oh, learnedrange(oh))
         feed!(oh, oh.learnBuffer)
         oh.learnBuffer = nothing
