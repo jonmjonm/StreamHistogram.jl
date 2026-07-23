@@ -111,11 +111,23 @@ accumulator is unaffected by `integer` — it's already exact and O(1) per
 point regardless of mode, so there's nothing to gain by treating it
 differently here.
 
+`integer=:auto` defers the decision to the learn phase: once the learn buffer
+fills, `oh.integer` is set to `true` iff every buffered point `isinteger`,
+otherwise `false`. Because that decision needs a learn-phase sample to
+inspect, `:auto` requires `learn=true` and neither `bins` nor `binRange`
+(both skip the learn phase and fix the range immediately, leaving nothing to
+inspect) — passing either alongside `integer=:auto` raises `ArgumentError` at
+construction. The `bins`/`binNum` conflict check above still applies; it's
+just deferred until the buffer fills and `integer` is actually resolved, so
+`StreamHist(integer=:auto, binNum=99)` doesn't error until the first `add!`
+that completes the learn phase, and only if the buffer turns out to be
+integer-valued.
+
 ## Construction options
 
 ```julia
 StreamHist(;
-    integer      = false,           # integer-valued data; disables the ASH
+    integer      = false,           # true/false/:auto; integer-valued data disables the ASH
     momentPowers = [1, 2, 4, 8],    # which moment orders to track/expose
     learn        = true,            # auto-pick the range from the first points
     learnLength  = 10_000,          # how many points to buffer before deciding

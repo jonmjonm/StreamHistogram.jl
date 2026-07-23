@@ -216,6 +216,51 @@ end
     @test StreamHist(integer=true, binRange=(1, 10)) isa StreamHist
 end
 
+@testset "integer=:auto detects integer-valued learn buffer" begin
+    oh = StreamHist(integer=:auto, learnLength=50)
+    add!(oh, collect(1:50))
+    @test oh.integer
+    @test !oh.integerAuto
+    @test isinitialized(oh)
+    @test eltype(exactHistogram(oh).edges[1]) == Int
+    add!(oh, [51, 52])
+    finalize!(oh)
+    @test nobs(oh) == 52
+    @test_throws ArgumentError density(oh)
+end
+
+@testset "integer=:auto detects non-integer learn buffer" begin
+    oh = StreamHist(integer=:auto, learnLength=50)
+    add!(oh, [collect(1:49); 3.5])
+    @test !oh.integer
+    @test !oh.integerAuto
+    @test isinitialized(oh)
+    add!(oh, randn(10))
+    finalize!(oh)
+    @test density(oh) isa Function
+end
+
+@testset "integer=:auto defers the binNum conflict check until resolution" begin
+    # No conflict raised yet -- integer isn't decided until the buffer fills.
+    oh = StreamHist(integer=:auto, binNum=99, learnLength=20)
+    @test oh.integerAuto
+
+    # Resolves to non-integer: binNum=99 is actually used, no conflict.
+    add!(oh, randn(20))
+    @test !oh.integer
+
+    # Resolves to integer: binNum=99 conflicts, raised at resolution time.
+    oh2 = StreamHist(integer=:auto, binNum=99, learnLength=20)
+    @test_throws ArgumentError add!(oh2, collect(1:20))
+end
+
+@testset "integer=:auto requires learn=true and rejects bins/binRange" begin
+    @test_throws ArgumentError StreamHist(integer=:auto, binRange=(1, 10))
+    @test_throws ArgumentError StreamHist(integer=:auto, bins=[0.5, 5.5, 10.5])
+    @test_throws ArgumentError StreamHist(integer=:auto, learn=false)
+    @test_throws ArgumentError StreamHist(integer=:notauto)
+end
+
 @testset "densityQuality on a Gaussian" begin
     oh = StreamHist(binRange=(-6.0, 6.0), binNum=200, momentPowers=[1, 2, 4])
     add!(oh, randn(20_000))

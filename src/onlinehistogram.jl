@@ -4,6 +4,9 @@ const DEFAULT_BIN_NUM = 50
 mutable struct StreamHist
     # config, fixed at construction
     integer::Bool
+    # true iff `integer=:auto` was requested and not yet resolved from the
+    # learn buffer; `integer` itself is a placeholder (`false`) until then
+    integerAuto::Bool
     momentPowers::Vector{Int}
     learn::Bool
     learnLength::Int
@@ -61,7 +64,12 @@ online central moments, all updatable one point or one batch at a time.
   bin per integer) and raise `ArgumentError`; `closed` is silently
   overridden to `:left` regardless of what's passed, since that's the only
   convention under which the one-bin-per-integer edge construction is
-  correct.
+  correct. Can also be `:auto`, which decides `true`/`false` from whether
+  every point in the learn-phase buffer is `isinteger` (requires
+  `learn=true` and neither `bins` nor `binRange`, since those skip the learn
+  phase entirely and leave no sample to inspect); the `bins`/`binNum`
+  conflict check above still applies, just deferred until the buffer fills
+  and the decision is made.
 - `momentPowers`: which moment orders to expose via `moment(oh, p)`.
 - `binRange = (lo, hi)`: fix the histogram/ASH range up front.
 - `binNum`: number of traditional-histogram bins (ignored if `bins` given;
@@ -82,7 +90,7 @@ online central moments, all updatable one point or one batch at a time.
   ASH regardless of size, since they're already batches.
 """
 function StreamHist(;
-    integer::Bool=false,
+    integer::Union{Bool,Symbol}=false,
     momentPowers::AbstractVector{<:Integer}=DEFAULT_MOMENT_POWERS,
     learn::Bool=true,
     learnLength::Integer=10_000,
@@ -96,7 +104,16 @@ function StreamHist(;
     ashNGrid::Integer=500,
     ashBatchSize::Integer=256,
 )
-    if integer
+    integerAuto = integer === :auto
+    if integerAuto
+        bins === nothing && binRange === nothing || throw(ArgumentError(
+            "`integer=:auto` requires the learn phase to pick the range; " *
+            "don't pass `bins` or `binRange`, which skip it"))
+        learn || throw(ArgumentError("`integer=:auto` requires `learn=true`"))
+        integer = false # placeholder; resolved from the learn buffer once it fills
+    elseif integer isa Symbol
+        throw(ArgumentError("`integer` must be `true`, `false`, or `:auto`, got `:$integer`"))
+    elseif integer
         bins === nothing || throw(ArgumentError(
             "`bins` has no effect when `integer=true` (edges are always one bin per integer); " *
             "pass `binRange` instead, or drop `integer=true`"))
@@ -108,7 +125,7 @@ function StreamHist(;
     maxp = max(1, maximum(momentPowers))
 
     oh = StreamHist(
-        integer, momentPowers, learn, Int(learnLength), Float64(paddingPct),
+        integer, integerAuto, momentPowers, learn, Int(learnLength), Float64(paddingPct),
         Int(binNum), closed, kernel, Int(m), Int(ashNGrid), Int(ashBatchSize),
         Float64[], nothing, nothing, Float64[],
         MomentAccumulator(maxp), Inf, -Inf, 0, 0, false,
@@ -179,6 +196,27 @@ function integeredges(lo::Real, hi::Real)
     return lo_i:1:(hi_i + 1)
 end
 
+"""
+    resolveintegerauto!(oh)
+
+If `integer=:auto` was requested, decide it now from the (about to be
+consumed) learn buffer: `true` iff every buffered point `isinteger`. Applies
+the same `binNum` conflict check that `integer=true` gets at construction,
+just deferred until the decision is actually made. No-op once resolved (or
+if `:auto` was never requested).
+"""
+function resolveintegerauto!(oh::StreamHist)
+    oh.integerAuto || return oh
+    oh.integerAuto = false
+    oh.integer = all(isinteger, oh.learnBuffer)
+    if oh.integer && oh.binNum != DEFAULT_BIN_NUM
+        throw(ArgumentError(
+            "`binNum` has no effect when `integer=true` (edges are always one bin per integer); " *
+            "the learn-phase sample was auto-detected (`integer=:auto`) as integer-valued"))
+    end
+    return oh
+end
+
 function initializerange!(oh::StreamHist, range::Tuple{Float64,Float64}; bins::Union{Nothing,Vector{Float64}}=nothing)
     lo, hi = range
     if oh.integer
@@ -229,6 +267,7 @@ function add!(oh::StreamHist, x::Real)
     if !isinitialized(oh)
         push!(oh.learnBuffer, x)
         if length(oh.learnBuffer) >= oh.learnLength
+            resolveintegerauto!(oh)
             initializerange!(oh, learnedrange(oh))
             feed!(oh, oh.learnBuffer)
             oh.learnBuffer = nothing
@@ -256,6 +295,7 @@ function add!(oh::StreamHist, xs)
     if !isinitialized(oh)
         append!(oh.learnBuffer, fxs)
         if length(oh.learnBuffer) >= oh.learnLength
+            resolveintegerauto!(oh)
             initializerange!(oh, learnedrange(oh))
             feed!(oh, oh.learnBuffer)
             oh.learnBuffer = nothing
