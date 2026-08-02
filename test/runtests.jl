@@ -2,8 +2,36 @@ using Test
 using Random
 using Statistics
 using StreamHistogram
+using QuadGK
 
 Random.seed!(1234)
+
+@testset "tv_distance integrates ASH densities over their supports" begin
+    function finalized_hist(data, range)
+        oh = StreamHist(learn=false, binRange=range, binNum=40)
+        add!(oh, data)
+        finalize!(oh)
+        return oh
+    end
+
+    left = finalized_hist(collect(range(0.05, 0.95; length=400)), (0.0, 1.0))
+    same = finalized_hist(collect(range(0.05, 0.95; length=400)), (0.0, 1.0))
+    right = finalized_hist(collect(range(2.05, 2.95; length=400)), (2.0, 3.0))
+
+    @test tv_distance(left, left) ≈ 0.0 atol=1e-10
+    @test tv_distance(left, same) ≈ 0.0 atol=1e-10
+
+    fleft, fright = density(left), density(right)
+    expected = first(QuadGK.quadgk(x -> abs(fleft(x) - fright(x)), 0.0, 3.0)) / 2
+    @test tv_distance(left, right) ≈ expected atol=1e-8
+    @test tv_distance(left.ash, right.ash) ≈ tv_distance(left, right) atol=1e-10
+    @test lp_distance(left, right; p=1) ≈ 2 * tv_distance(left, right) atol=1e-10
+    expected_l2 = sqrt(first(QuadGK.quadgk(x -> abs(fleft(x) - fright(x))^2, 0.0, 3.0)))
+    @test lp_distance(left.ash, right.ash; p=2) ≈ expected_l2 atol=1e-8
+    @test_throws ArgumentError lp_distance(left, right; p=0)
+    @test tv_distance(left, right) ≈ tv_distance(right, left) atol=1e-10
+    @test_throws ArgumentError tv_distance(StreamHist(learn=false, binRange=(0.0, 1.0)), left)
+end
 
 @testset "MomentAccumulator vs naive (Float64 batch)" begin
     xs = randn(5000) .* 3 .+ 100.0  # away from zero, to stress the naive formula

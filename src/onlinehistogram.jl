@@ -401,8 +401,13 @@ again.
 function density(oh::StreamHist)
     oh.integer && throw(ArgumentError("density(::StreamHist) is unavailable in integer mode"))
     oh.finalized || throw(ArgumentError("StreamHist must be finalize!(oh)d before calling density(oh)"))
-    rng = oh.ash.rng
-    dens = oh.ash.density
+    return _ash_density(oh.ash)
+end
+
+"""Return the package's linearly interpolated, zero-outside-support ASH density."""
+function _ash_density(ash::Ash)
+    rng = ash.rng
+    dens = ash.density
     lo, hi = first(rng), last(rng)
     Δ = step(rng)
     n = length(rng)
@@ -415,6 +420,73 @@ function density(oh::StreamHist)
         return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
     end
 end
+
+"""
+    lp_distance(a::Ash, b::Ash; p=2, rtol=sqrt(eps(Float64)), atol=0.0)
+    lp_distance(a::StreamHist, b::StreamHist; p=2, rtol=sqrt(eps(Float64)), atol=0.0)
+
+Return the finite-``p`` L^p distance between ASH density estimates:
+
+```math
+\\lVert f_a-f_b\\rVert_p =
+\\left(\\int |f_a(x)-f_b(x)|^p\\,dx\\right)^{1/p}.
+```
+
+The integral is evaluated over the two densities' finite ASH-grid supports.
+It is split into the left non-overlapping tail, the overlapping region, and
+the right non-overlapping tail.  This avoids evaluating either density
+outside its support.  If the supports are disjoint, the middle integral is
+empty.
+
+The `StreamHist` method requires non-integer, finalized histograms and
+delegates to the `Ash` method. `rtol` and `atol` are passed to
+`QuadGK.quadgk`.
+"""
+function lp_distance(a::Ash, b::Ash;
+    p::Real=2, rtol::Real=sqrt(eps(Float64)), atol::Real=0.0)
+    nobs(a) > 0 || throw(ArgumentError("lp_distance requires a nonempty first Ash"))
+    nobs(b) > 0 || throw(ArgumentError("lp_distance requires a nonempty second Ash"))
+    isfinite(p) && p > 0 || throw(ArgumentError("p must be finite and positive"))
+    rtol >= 0 || throw(ArgumentError("rtol must be nonnegative"))
+    atol >= 0 || throw(ArgumentError("atol must be nonnegative"))
+
+    fa = _ash_density(a)
+    fb = _ash_density(b)
+    alo, ahi = first(a.rng), last(a.rng)
+    blo, bhi = first(b.rng), last(b.rng)
+
+    integral(f, lo, hi) = lo < hi ? first(quadgk(f, lo, hi; rtol=rtol, atol=atol)) : 0.0
+
+    left_lo, left_hi = min(alo, blo), max(alo, blo)
+    left_density = alo <= blo ? fa : fb
+    left_tail = integral(x -> abs(left_density(x))^p, left_lo, left_hi)
+
+    overlap_lo, overlap_hi = max(alo, blo), min(ahi, bhi)
+    overlap = integral(x -> abs(fa(x) - fb(x))^p, overlap_lo, overlap_hi)
+
+    right_lo, right_hi = min(ahi, bhi), max(ahi, bhi)
+    right_density = ahi >= bhi ? fa : fb
+    right_tail = integral(x -> abs(right_density(x))^p, right_lo, right_hi)
+
+    return (left_tail + overlap + right_tail)^(inv(p))
+end
+
+@inline function lp_distance(a::StreamHist, b::StreamHist; kwargs...)
+    a.integer && throw(ArgumentError("lp_distance(::StreamHist, ::StreamHist) is unavailable in integer mode"))
+    b.integer && throw(ArgumentError("lp_distance(::StreamHist, ::StreamHist) is unavailable in integer mode"))
+    a.finalized || throw(ArgumentError("first StreamHist must be finalize!(...)d before calling lp_distance"))
+    b.finalized || throw(ArgumentError("second StreamHist must be finalize!(...)d before calling lp_distance"))
+    return lp_distance(a.ash, b.ash; kwargs...)
+end
+
+"""
+    tv_distance(a, b; kwargs...)
+
+Return the total-variation distance between two ASH density estimates, equal
+to one half of `lp_distance(a, b; p=1, kwargs...)`.
+"""
+tv_distance(a::Ash, b::Ash; kwargs...) = lp_distance(a, b; p=1, kwargs...) / 2
+@inline tv_distance(a::StreamHist, b::StreamHist; kwargs...) = lp_distance(a, b; p=1, kwargs...) / 2
 
 """
     histogram(oh, bins)
