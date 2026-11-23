@@ -157,6 +157,9 @@ exactly. A large count here means the range picked (by `--learn` or given
 explicitly) turned out to be too narrow for the data actually seen.
 """
 outofrange(oh::StreamHist) = (underflow=oh.underflowCount, overflow=oh.overflowCount)
+
+"Number of points counted inside the histogram's range."
+ninrange(oh::StreamHist) = nobs(oh) - oh.underflowCount - oh.overflowCount
 Statistics.mean(oh::StreamHist) = mean(oh.moments)
 variance(oh::StreamHist) = variance(oh.moments)
 Statistics.std(oh::StreamHist) = std(oh.moments)
@@ -495,6 +498,9 @@ Integrates `density(oh)` between consecutive `bins` edges (scaled by
 `nobs(oh)`) to produce expected counts over an arbitrary set of edges.
 """
 function histogram(oh::StreamHist, bins::AbstractVector{<:Real})
+    # No point fell inside the range (all under/overflow): the density is undefined (NaN), and nothing falls
+    # in any bin.
+    ninrange(oh) == 0 && return (edges=collect(bins), weights=zeros(length(bins) - 1))
     d = density(oh)
     n = nobs(oh)
     weights = [n * first(quadgk(d, bins[i], bins[i + 1])) for i in 1:(length(bins) - 1)]
@@ -508,9 +514,11 @@ For each requested moment power (in the order of `oh.momentPowers`),
 numerically integrates the ASH density against `(x - mean)^p` and compares
 it to the moment accumulator's value. Returns a `Vector{Float64}` of the
 relative error `abs(fromdensity - exact) / (abs(exact) + eps())` between the
-two estimates, one entry per power.
+two estimates, one entry per power. If no point fell inside the histogram's
+range (all under/overflow), the density is undefined and every entry is `NaN`.
 """
 function densityQuality(oh::StreamHist)
+    ninrange(oh) == 0 && return fill(NaN, length(oh.momentPowers))
     d = density(oh)
     rng = oh.ash.rng
     lo, hi = first(rng), last(rng)

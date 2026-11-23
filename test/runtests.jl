@@ -246,6 +246,19 @@ end
     @test isinitialized(floats) && !floats.integer
 end
 
+@testset "no point inside the range: NaN density quality, zero counts, no error" begin
+    # e.g. one --bin-range applied to many fields, one of which lies entirely outside it
+    oh = StreamHist(binRange=(100.0, 250.0), binNum=3)
+    add!(oh, [838.0, 839.5, 840.1])
+    finalize!(oh)
+    @test outofrange(oh) == (underflow=0, overflow=3)
+    @test exactHistogram(oh).weights == [0, 0, 0]
+    @test isnan(density(oh)(125.0))
+    q = densityQuality(oh)
+    @test length(q) == length(oh.momentPowers) && all(isnan, q)
+    @test histogram(oh, [100.0, 175.0, 250.0]).weights == [0.0, 0.0]
+end
+
 @testset "learn=false needs a range" begin
     @test_throws ArgumentError StreamHist(learn=false)
     @test isinitialized(StreamHist(learn=false, binRange=(0, 1)))
