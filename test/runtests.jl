@@ -213,6 +213,57 @@ end
     @test sum(exactHistogram(oh).weights) == 1500
 end
 
+@testset "single-point add! finishes the learn phase like a batch add!" begin
+    # Feeding points one at a time (the streaming use) must cross learnLength inside the scalar add!,
+    # fix the same range, replay the buffer, and end up identical to feeding the same data as one batch.
+    data = [sin(1.7i) * 3 + 0.01i for i in 1:1500]
+    one = StreamHist(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
+    for (k, x) in enumerate(data)
+        add!(one, x)
+        @test isinitialized(one) == (k >= 1000)   # initialized exactly when the buffer fills
+    end
+    batch = StreamHist(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
+    add!(batch, data[1:1000]); add!(batch, data[1001:end])
+    finalize!(one); finalize!(batch)
+    @test nobs(one) == nobs(batch) == length(data)
+    @test exactHistogram(one).edges == exactHistogram(batch).edges
+    @test exactHistogram(one).weights == exactHistogram(batch).weights
+    @test outofrange(one) == outofrange(batch)
+    @test sum(exactHistogram(one).weights) + outofrange(one).underflow + outofrange(one).overflow == length(data)
+    @test mean(one) ≈ mean(batch) rtol=1e-12
+    @test density(one)(0.0) ≈ density(batch)(0.0) rtol=1e-10
+
+    # integer=:auto is resolved by the scalar path too
+    ints = StreamHist(integer=:auto, learnLength=50)
+    for i in 1:60
+        add!(ints, i % 7)
+    end
+    @test isinitialized(ints) && ints.integer
+    floats = StreamHist(integer=:auto, learnLength=50)
+    for i in 1:60
+        add!(floats, i / 7)
+    end
+    @test isinitialized(floats) && !floats.integer
+end
+
+@testset "no point inside the range: NaN density quality, zero counts, no error" begin
+    # e.g. one --bin-range applied to many fields, one of which lies entirely outside it
+    oh = StreamHist(binRange=(100.0, 250.0), binNum=3)
+    add!(oh, [838.0, 839.5, 840.1])
+    finalize!(oh)
+    @test outofrange(oh) == (underflow=0, overflow=3)
+    @test exactHistogram(oh).weights == [0, 0, 0]
+    @test isnan(density(oh)(125.0))
+    q = densityQuality(oh)
+    @test length(q) == length(oh.momentPowers) && all(isnan, q)
+    @test histogram(oh, [100.0, 175.0, 250.0]).weights == [0.0, 0.0]
+end
+
+@testset "learn=false needs a range" begin
+    @test_throws ArgumentError StreamHist(learn=false)
+    @test isinitialized(StreamHist(learn=false, binRange=(0, 1)))
+end
+
 @testset "finalize! forces early range init" begin
     oh = StreamHist(learn=true, learnLength=10_000)
     add!(oh, randn(50))
