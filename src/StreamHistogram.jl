@@ -3,16 +3,18 @@ module StreamHistogram
 using Statistics
 using StatsBase
 using StatsBase: Histogram
-using AverageShiftedHistograms
-using AverageShiftedHistograms: Ash, ash, ash!
 using QuadGK
 
 import Statistics: mean, std
 import StatsBase: nobs
 
-export StreamHist, add!, finalize!, density, densityQuality, exactHistogram, histogram,
-    moment, moments, nobs, datarange, outofrange, lp_distance, tv_distance, mean, variance, std, skewness, kurtosis,
-    isinitialized, MomentAccumulator
+export StreamHist, add!, finalize!, isinitialized, MomentAccumulator,
+    nobs, datarange, outofrange, exactHistogram, density, densityGrid, histogram, densityQuality,
+    moment, moments, mean, variance, std, skewness, kurtosis, lp_distance, tv_distance,
+    totalweight, effectivesamplesize, outofrangeweight, weightedHistogram, weightedDensity, meanWeight,
+    cdf, weightedCdf,
+    weightedDensityQuality, weightedMoment, weightedMoments, weightedMean, weightedVariance, weightedStd,
+    weightedSkewness, weightedKurtosis
 
 include("moments.jl")
 include("onlinehistogram.jl")

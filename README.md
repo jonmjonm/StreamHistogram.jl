@@ -7,17 +7,21 @@ how much to trust it — from data arriving online, one point or one batch at
 a time. It's meant for the case where you don't have all the data up front
 (a stream, a simulation, a large file you don't want to hold in memory) but
 still want a proper histogram, a smoothed density estimate, and moments
-precise enough to check the two against each other.
+precise enough to check the two against each other. Points may carry
+weights (e.g. importance weights), and every statistic is then available
+both unweighted and weighted.
 
 A `StreamHist` maintains, incrementally and simultaneously:
 
 1. a traditional histogram (`StatsBase.Histogram`)
 2. an Average Shifted Histogram (ASH) density estimate
-   (`AverageShiftedHistograms.jl`)
 3. the exact min and max of every point seen
 4. online central moments at a configurable set of orders, computed with a
    numerically stable, mergeable algorithm (see
    [momentAccumulator.md](momentAccumulator.md))
+
+and, for weighted points, each of 1, 2 and 4 again with every point counted
+by its weight (see [Weights](#weights)).
 
 ## Trusting the numbers: exact moments, out-of-range counts, density quality
 
@@ -66,6 +70,47 @@ tell you when the smoothed density has drifted from the true shape of the
 data (e.g. because the smoothing bandwidth is too wide, or the histogram
 range no longer covers the tails).
 
+## Weights
+
+`add!(oh, x, w)` and `add!(oh, xs, ws)` add points with weights (finite and
+nonnegative; `add!(oh, x)` means weight 1). Weights never change the
+unweighted results: each tally is kept twice, side by side.
+
+| unweighted (every point counts 1) | weighted (every point counts its weight) |
+|---|---|
+| `nobs(oh)` | `totalweight(oh)` |
+| `exactHistogram(oh)` (counts per bin) | `weightedHistogram(oh)` (sum of weights per bin) |
+| `density(oh)`, `cdf(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedCdf(oh)`, `weightedHistogram(oh, bins)` |
+| `moment(oh, p)`, `mean`, `variance`, `std`, `skewness`, `kurtosis` | `weightedMoment(oh, p)`, `weightedMean`, `weightedVariance`, `weightedStd`, `weightedSkewness`, `weightedKurtosis` |
+| `outofrange(oh)` | `outofrangeweight(oh)` |
+| `densityQuality(oh)` | `weightedDensityQuality(oh)` |
+
+Weighted moments are the population moments of the weighted data,
+`Σw(x - mean)^p / Σw` with `mean = Σwx / Σw` -- the right reading for
+importance weights, where the weighted points stand for the target
+distribution. They use the same mergeable accumulator as the unweighted
+moments, with counts replaced by sums of weights, which keeps the formulas
+exact (Pébay et al. 2016).
+
+**Weighted = count × mean weight.** The ASH grid keeps, for each grid cell,
+both the number of points and their sum of weights. The weighted density is
+the second smoothed with the same kernel, grid and width as the first. So it
+equals the count density times the kernel-smoothed mean weight `E[w | x]`,
+exactly, and equals the count density when all weights are equal. The same
+holds bin by bin in the traditional histograms: `meanWeight(oh)` gives each
+bin's mean weight, and `weightedHistogram(oh)`'s weights are the counts times
+it. A flat `meanWeight` means the weights don't depend on the value; a steep
+one means the weighting reshapes this statistic.
+
+**How many points is a weighted sample worth?**
+`effectivesamplesize(oh)` is Kish's `(Σw)² / Σw²`: `nobs(oh)` when all
+weights are equal, and much less when a few points carry most of the
+weight. A small value means the weighted statistics are noisy, however many
+points went in.
+
+A point of weight 0 still counts in `nobs`, the min/max and every unweighted
+result; it just adds no weight.
+
 ## The learn phase
 
 Both the histogram and the ASH need a fixed bin range up front — neither
@@ -96,8 +141,8 @@ to spot even though the binned/smoothed views are lossy out there.
 ## Integer mode
 
 When `integer=true`, the data is known to be integer-valued: bins are
-centered exactly on the integers in the observed (or given) range, and the
-ASH is disabled (`density`/`histogram`/`densityQuality` are unavailable —
+centered exactly on the integers in the observed (or given) range, and there
+is no ASH (`density`/`histogram`/`densityQuality` are unavailable —
 there's no smoothing to do, and no bandwidth to get wrong, for exact integer
 counts).
 
@@ -127,7 +172,7 @@ integer-valued.
 
 ```julia
 StreamHist(;
-    integer      = false,           # true/false/:auto; integer-valued data disables the ASH
+    integer      = false,           # true/false/:auto; integer-valued data has no ASH density
     momentPowers = [1, 2, 4, 8],    # which moment orders to track/expose
     learn        = true,            # auto-pick the range from the first points
     learnLength  = 10_000,          # how many points to buffer before deciding
@@ -136,52 +181,68 @@ StreamHist(;
     binNum       = 50,              # number of traditional-histogram bins
     bins         = nothing,         # explicit edges; overrides binRange/binNum
     closed       = :left,           # StatsBase.Histogram bin closedness
-    kernel       = AverageShiftedHistograms.Kernels.biweight,  # ASH kernel
-    m            = 5,               # ASH smoothing width
-    ashNGrid     = 500,             # resolution of the ASH's internal grid
-    ashBatchSize = 256,             # scalar add!s flush to the ASH in batches this big
+    kernel       = StreamHistogram.biweight,   # default ASH kernel, any function of u
+    m            = 5,               # default ASH smoothing width, in grid cells
+    ashNGrid     = 500,             # the ASH grid has ashNGrid + 1 points over the range
 )
 ```
 
-`closed`, `kernel`, and `m` are passed straight through to the underlying
-packages; everything about *where* the bins/range sit is owned by
-`integer`/`learn`/`binRange`/`binNum`/`bins`.
+`closed` is passed to `StatsBase.Histogram`; everything about *where* the
+bins/range sit is owned by `integer`/`learn`/`binRange`/`binNum`/`bins`.
 
-### Why `ashBatchSize`
+### How the ASH is computed
 
-`AverageShiftedHistograms.ash!` is dramatically cheaper per point when called
-once on a batch than called once per point (its cost is dominated by
-smoothing over the whole grid, not by how many new points it's given) — in a
-one-point-at-a-time streaming benchmark, calling it on a 100k-point batch
-took ~0.0001s total, versus ~0.37s calling it 100k times on single points.
-So a scalar `add!` doesn't call `ash!` immediately: it holds the point in an
-internal buffer and flushes to the ASH once `ashBatchSize` points have
-accumulated. Batch `add!` calls bypass this entirely and go straight to the
-ASH, since they're already batched. `finalize!` always flushes whatever's
-still pending, so nothing is silently missing from the final density — which
-is exactly why `density`/`histogram`/`densityQuality` require `oh` to be
-finalized (see below): between flushes, the ASH can lag behind the
-histogram/moments by up to `ashBatchSize` points.
+Adding a point only increments its nearest grid cell's count and weight sum
+(O(1)); the density is smoothed from the grid when it is read
+(`density`, `weightedDensity`, `densityGrid`), each cell `k`'s total spread
+over its neighbours `i` by `kernel((i - k) / m)` and then normalized. That
+is the computation of `AverageShiftedHistograms.jl` (the test suite checks
+the two agree to 1e-12), but on our own grid, which holds weights as well as
+counts and needs no batching of single-point `add!`s: reading is always
+current.
+
+`density(oh)` interpolates linearly between the grid points and is
+normalized so that it integrates to exactly 1 over the range; `cdf(oh)` is
+its exact integral (the interpolation is piecewise linear, so the integral is
+piecewise quadratic), and `histogram(oh, bins)` takes differences of it.
+
+Because the raw grid is kept, the smoothing can be changed when reading,
+without rebuilding: the density readers (`densityGrid`, `density`,
+`weightedDensity`, `cdf`, `weightedCdf`, `histogram(oh, bins)`,
+`weightedHistogram(oh, bins)`) take `m=` and `kernel=`, defaulting to the
+ones `oh` was built with:
+
+```julia
+density(oh; m=20)                          # smoother
+cdf(oh; kernel=u -> exp(-u^2 / 2), m=3)    # a gaussian kernel
+```
 
 ## Functions
 
-- `add!(oh, data)` — add a single point or a vector of points.
-- `finalize!(oh)` — marks `oh` ready to read; if still mid-learn, forces the
-  range to be fixed now from whatever's in the buffer. Any later `add!`
-  un-finalizes `oh` again, requiring another `finalize!` before reading.
+- `add!(oh, x[, w])`, `add!(oh, xs[, ws])` — add a point or a vector of
+  points, optionally weighted.
+- `finalize!(oh)` — if still mid-learn, fixes the range now from whatever's
+  in the buffer, so the histograms and densities can be read. A no-op once
+  the range is fixed; points can still be added afterwards.
 - `density(oh)` — a callable `x -> density(x)`, linearly interpolating the
-  ASH. Errors in integer mode, and requires `oh` to be finalized (raises
-  `ArgumentError` otherwise) since the ASH can lag behind by up to
-  `ashBatchSize` points until a `finalize!`/flush.
+  ASH; it integrates to 1. Errors in integer mode, and while the range is not
+  yet fixed.
+- `cdf(oh)` — a callable `x -> cdf(x)`, the exact integral of `density(oh)`
+  up to `x`: 0 below the range, 1 from its top up.
+- `densityGrid(oh; weighted=false)` — `(grid=, density=)`, the ASH at its grid
+  points.
+- The density readers take `m=` and `kernel=` to smooth with another width or
+  kernel than the ones `oh` was built with; see
+  [How the ASH is computed](#how-the-ash-is-computed).
 - `densityQuality(oh)` — for each requested moment power (in the order of
   `oh.momentPowers`), numerically integrates the ASH density against
   `(x-mean)^p` and compares it to the true moment accumulator value; returns
   a `Vector{Float64}` of the relative error between the two estimates.
 - `exactHistogram(oh)` — the underlying `StatsBase.Histogram` (edges + raw
   counts).
-- `histogram(oh, bins)` — integrates `density(oh)` between an arbitrary set
-  of edges (scaled by `nobs(oh)`) to produce expected counts over bins that
-  needn't match the ones `oh` was built with.
+- `histogram(oh, bins)` — integrates `density(oh)` exactly between an
+  arbitrary set of edges (scaled by the number of points in range) to produce
+  expected counts over bins that needn't match the ones `oh` was built with.
 - `moment(oh, p)` / `moments(oh)` — the order-`p` moment (mean for `p==1`,
   population central moment for `p>=2`), or all requested moments as a
   `Dict`.
@@ -194,12 +255,17 @@ histogram/moments by up to `ashBatchSize` points.
   outside the fixed histogram range; see above.
 - `isinitialized(oh)` — whether the range has been fixed yet (`false` while
   still learning).
+- `lp_distance(a, b; p=2, weighted=false)`, `tv_distance(a, b; weighted=false)`
+  — L^p and total-variation distances between two histograms' ASH densities
+  (weighted densities if `weighted`).
+- The weighted counterparts (`totalweight`, `weightedHistogram`,
+  `weightedDensity`, `weightedCdf`, `weightedMoment`, `weightedMoments`, `weightedMean`, ...,
+  `outofrangeweight`, `weightedDensityQuality`), `meanWeight(oh)` and
+  `effectivesamplesize(oh)` — see [Weights](#weights).
 
-Not in v1: merging two independently-built `StreamHist`s. The moments and
-the traditional histogram are both natively mergeable, but
-`AverageShiftedHistograms.jl` doesn't expose a public merge for two `Ash`
-objects, so a faithful `merge!` isn't possible without reaching into its
-internals — left out for now rather than done halfway.
+Not yet: merging two independently-built `StreamHist`s. The moments, the
+traditional histograms and the ASH grid are all mergeable (same range
+required), but it isn't written.
 
 ## Example
 
@@ -215,6 +281,14 @@ finalize!(oh)
 mean(oh), variance(oh), skewness(oh)
 exactHistogram(oh)
 outofrange(oh)  # (underflow=, overflow=) -- check this if the learned range looks too narrow
-d = density(oh)
+d = density(oh)                 # d(x) at any x
+F = cdf(oh)                     # F(b) - F(a): the estimated fraction of points in (a, b]
+density(oh; m=20)               # the same data, smoothed more
 densityQuality(oh)
+
+# weighted points, e.g. importance weights
+ow = StreamHist(binRange=(-5.0, 5.0))
+add!(ow, xs, ws)
+weightedMean(ow), effectivesamplesize(ow)
+weightedDensity(ow), meanWeight(ow)
 ```

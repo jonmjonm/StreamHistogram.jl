@@ -1,6 +1,7 @@
 # End-to-end correctness tests: does StreamHist's output agree with
 # independently-computed ground truth (StatsBase on the raw data, known
-# analytic distribution properties, a directly-built reference Histogram/Ash)
+# analytic distribution properties, a directly-built reference Histogram, and an ASH from
+# AverageShiftedHistograms.jl, which StreamHist's own ASH must reproduce)
 # -- as opposed to runtests.jl's tests of the internal mechanics
 # (merge/addpoint/batchaccumulator agreement, API surface, error paths).
 
@@ -96,10 +97,8 @@ end
 
     reference = ash(data; rng=rng, kernel=AverageShiftedHistograms.Kernels.biweight, m=5)
 
-    oh = StreamHist(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1, ashBatchSize=333)
-    # deliberately uneven batch sizes, mixing scalar and batch add!, to
-    # stress the ashPending flush logic against a range that doesn't line
-    # up evenly with ashBatchSize
+    oh = StreamHist(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1)
+    # mixing scalar and batch add!
     add!(oh, data[1:7])
     for x in data[8:5000]
         add!(oh, x)
@@ -107,9 +106,15 @@ end
     add!(oh, data[5001:end])
     finalize!(oh)
 
-    @test oh.ash.rng == reference.rng
-    @test nobs(oh.ash) == nobs(reference)
-    @test oh.ash.density ≈ reference.density rtol=1e-8
+    @test oh.grid == reference.rng
+    @test oh.gridCounts == reference.counts
+    @test densityGrid(oh).density ≈ reference.density rtol=1e-12
+    # with another kernel and smoothing width too
+    oh2 = StreamHist(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1,
+                     kernel=AverageShiftedHistograms.Kernels.gaussian, m=12)
+    add!(oh2, data)
+    ref2 = ash(data; rng=rng, kernel=AverageShiftedHistograms.Kernels.gaussian, m=12)
+    @test densityGrid(oh2).density ≈ ref2.density rtol=1e-12
 end
 
 @testset "density integrates to ~1 and moments computed from it match the accumulator" begin
@@ -137,7 +142,7 @@ end
     finalize!(oh)
 
     d = density(oh)
-    rng, dens = oh.ash.rng, oh.ash.density
+    rng, dens = densityGrid(oh)
     # at every grid node itself, the interpolant must reproduce the ASH's
     # own value exactly (not just "close"), since interpolation weight
     # collapses fully onto that node
