@@ -46,9 +46,8 @@ mutable struct StreamHist
     exactMin::Float64
     exactMax::Float64
 
-    # Points that fell outside the fixed histogram range are not clamped into the edge bins (that would distort
-    # the edge bins' shape and mask exactly the "range turned out too narrow" signal datarange/densityQuality
-    # exist to surface). Instead they're tallied separately, ROOT/HEP-style, so
+    # Points outside the histogram's range are not clamped into the edge bins (that would distort the edge bins
+    # and hide a range that turned out too narrow). They are tallied here instead, ROOT/HEP-style, so
     # sum(exactHistogram(oh).weights) + under + over == nobs(oh) always holds exactly (and likewise for weights).
     underflowCount::Int
     overflowCount::Int
@@ -62,39 +61,44 @@ end
                binNum=50, bins=nothing, closed=:left,
                kernel=StreamHistogram.biweight, m=5, ashNGrid=500)
 
-An online histogram of points, each with an optional weight: maintains a
-traditional (`StatsBase.Histogram`) histogram, an Average Shifted Histogram
-(ASH) density estimate, exact min/max, and online central moments, all
-updatable one point or one batch at a time -- each both unweighted (every
-point counts once) and weighted (every point counts its weight).
+An empty online histogram. Points, optionally weighted, are added with `add!`,
+one at a time or in batches. It keeps a traditional histogram
+(`StatsBase.Histogram`), an average shifted histogram (ASH) grid from which
+the density is computed, the exact minimum and maximum, exact central
+moments, and counts of the points outside the range: each both unweighted
+(every point counts once) and weighted (every point counts its weight).
 
-- `integer`: data is integer-valued; bins are centered on the integers in the
-  observed/given range and there is no ASH density. `bins` and a non-default
-  `binNum` conflict with this (edges are always one bin per integer) and
-  raise `ArgumentError`; `closed` is silently overridden to `:left`
-  regardless of what's passed, since that's the only convention under which
-  the one-bin-per-integer edge construction is correct. Can also be `:auto`,
-  which decides `true`/`false` from whether every point in the learn-phase
-  buffer is `isinteger` (requires `learn=true` and neither `bins` nor
-  `binRange`, since those skip the learn phase entirely and leave no sample
-  to inspect); the `bins`/`binNum` conflict check above still applies, just
-  deferred until the buffer fills and the decision is made.
-- `momentPowers`: which moment orders to expose via `moment(oh, p)`.
-- `binRange = (lo, hi)`: fix the histogram/ASH range up front.
-- `binNum`: number of traditional-histogram bins (ignored if `bins` given;
-  not permitted with `integer=true`).
-- `bins`: explicit bin edges for the traditional histogram; overrides
-  `binRange`/`binNum`. The ASH range is taken from `extrema(bins)`. Not
-  permitted with `integer=true`.
-- `learn`/`learnLength`: if no `bins`/`binRange` is given, the first
-  `learnLength` points are buffered, then used to pick a range
-  (`extrema(buffer)` padded by `paddingPct` on each side).
-- `closed`: passed to `StatsBase.Histogram` (ignored when `integer=true`, see
-  above).
-- `ashNGrid`, `kernel`, `m`: the ASH grid has `ashNGrid + 1` points over the
-  range; each grid cell's total is spread over its neighbours `i` by
-  `kernel((i - k) / m)`. `kernel` and `m` are only the defaults: the density
-  readers take `kernel=` and `m=` to smooth the same grid differently.
+The range:
+- `binRange = (lo, hi)`: a fixed range for the histogram and the ASH grid.
+- `bins`: explicit histogram edges, overriding `binRange` and `binNum`; the
+  ASH grid spans `first(bins)` to `last(bins)`.
+- Otherwise, with `learn=true`, the first `learnLength` points are buffered
+  and the range is set from their minimum and maximum, widened by
+  `paddingPct` of the span on each side (`finalize!` sets it early).
+  `learn=false` requires `bins` or `binRange`.
+
+The histogram:
+- `binNum`: the number of bins (when `bins` isn't given).
+- `closed`: passed to `StatsBase.Histogram`.
+
+The density:
+- `ashNGrid`: the ASH grid has `ashNGrid + 1` points across the range.
+- `kernel`, `m`: the default smoothing: each grid point's count is spread over
+  its neighbours `i` by `kernel((i - k) / m)`. The density readers take
+  `kernel=` and `m=` to smooth the same grid differently.
+
+The moments:
+- `momentPowers`: the orders `moment(oh, p)` reports. The accumulator tracks
+  every order up to the highest, so `skewness` needs it to be at least 3 and
+  `kurtosis` at least 4.
+
+Integer-valued data:
+- `integer=true`: one bin per integer in the range, and no ASH grid or density.
+  `bins` and a non-default `binNum` raise `ArgumentError`; `closed` is always
+  `:left`, so that bin `[k, k+1)` holds exactly the integer `k`.
+- `integer=:auto`: decided when the learn phase ends, `true` if every buffered
+  point `isinteger`. Needs the learn phase, so not with `bins`, `binRange` or
+  `learn=false`.
 """
 function StreamHist(;
     integer::Union{Bool,Symbol}=false,
@@ -157,8 +161,28 @@ end
 # ---------------------------------------------------------------------------------------------------------------
 # Counts, weights and moments
 
+"""
+    nobs(oh)
+
+The number of points added, in the range or not, whatever their weights.
+"""
 StatsBase.nobs(oh::StreamHist) = oh.moments.n
+
+"""
+    datarange(oh)
+
+`(min, max)` of every point added, in the range or not (`(Inf, -Inf)` before
+any point). Not the histogram's range, which is `extrema` of
+`exactHistogram(oh)`'s edges.
+"""
 datarange(oh::StreamHist) = (oh.exactMin, oh.exactMax)
+
+"""
+    isinitialized(oh)
+
+Whether the range is set: `false` during the learn phase, when the histograms
+and densities can't be read yet.
+"""
 isinitialized(oh::StreamHist) = oh.hist !== nothing
 
 """
@@ -182,12 +206,12 @@ effectivesamplesize(oh::StreamHist) = oh.sumW2 == 0 ? 0.0 : totalweight(oh)^2 / 
 """
     outofrange(oh)
 
-`(underflow=, overflow=)` counts of points that fell outside the fixed
-histogram range (below/above respectively) and so aren't reflected in
-`exactHistogram(oh)`'s bins. `sum(exactHistogram(oh).weights) +
-outofrange(oh).underflow + outofrange(oh).overflow == nobs(oh)` always holds
-exactly. A large count here means the range picked (by `--learn` or given
-explicitly) turned out to be too narrow for the data actually seen.
+`(underflow=, overflow=)`: the numbers of points below and above the
+histogram's range, which are not in `exactHistogram(oh)`'s bins. (With
+`closed=:left`, a point exactly at the top of the range is above it.)
+`sum(exactHistogram(oh).weights) + underflow + overflow == nobs(oh)` always
+holds exactly. A nonzero count means the range, learned or given, misses part
+of the data.
 """
 outofrange(oh::StreamHist) = (underflow=oh.underflowCount, overflow=oh.overflowCount)
 
@@ -206,10 +230,26 @@ ninrange(oh::StreamHist) = nobs(oh) - oh.underflowCount - oh.overflowCount
 "Sum of the weights of the points inside the histogram's range."
 inrangeweight(oh::StreamHist) = totalweight(oh) - oh.underflowWeight - oh.overflowWeight
 
+"The exact mean of every point added."
 Statistics.mean(oh::StreamHist) = mean(oh.moments)
+"The exact population variance `Σ(x - mean)² / n` of every point added (no `n - 1` correction)."
 variance(oh::StreamHist) = variance(oh.moments)
+"The square root of `variance(oh)`."
 Statistics.std(oh::StreamHist) = std(oh.moments)
+"""
+    skewness(oh)
+
+The third central moment over `variance(oh)^1.5`. Needs the highest order in
+`momentPowers` to be at least 3.
+"""
 skewness(oh::StreamHist) = skewness(oh.moments)
+"""
+    kurtosis(oh)
+
+The fourth central moment over `variance(oh)^2`; not the excess kurtosis, so
+3 for a normal distribution. Needs the highest order in `momentPowers` to be
+at least 4.
+"""
 kurtosis(oh::StreamHist) = kurtosis(oh.moments)
 
 """
@@ -223,7 +263,7 @@ function moment(oh::StreamHist, p::Integer)
     return centralmoment(oh.moments, p)
 end
 
-"`Dict{Int,Float64}` of every requested power => its moment."
+"`Dict{Int,Float64}`: each order in `momentPowers` => `moment(oh, p)`."
 moments(oh::StreamHist) = Dict(p => centralmoment(oh.moments, p) for p in oh.momentPowers)
 
 """
@@ -245,15 +285,15 @@ wcentralmoment(oh::StreamHist, p::Integer) = totalweight(oh) == 0 ? NaN : centra
 "`Dict` of every requested power => its weighted moment (see `weightedMoment`)."
 weightedMoments(oh::StreamHist) = Dict(p => wcentralmoment(oh, p) for p in oh.momentPowers)
 
-"Weighted mean `Σwx / Σw`."
+"The weighted mean `Σwx / Σw`; `NaN` while the total weight is 0."
 weightedMean(oh::StreamHist) = wcentralmoment(oh, 1)
-"Weighted population variance `Σw(x - mean)² / Σw`."
+"The weighted population variance `Σw(x - mean)² / Σw`; `NaN` while the total weight is 0."
 weightedVariance(oh::StreamHist) = variance(oh.wmoments)
-"Square root of `weightedVariance`."
+"The square root of `weightedVariance(oh)`."
 weightedStd(oh::StreamHist) = std(oh.wmoments)
-"Weighted skewness (third weighted central moment over `weightedVariance^1.5`)."
+"The weighted skewness: the third weighted central moment over `weightedVariance(oh)^1.5`."
 weightedSkewness(oh::StreamHist) = skewness(oh.wmoments)
-"Weighted kurtosis (fourth weighted central moment over `weightedVariance^2`)."
+"The weighted kurtosis (not excess): the fourth weighted central moment over `weightedVariance(oh)^2`."
 weightedKurtosis(oh::StreamHist) = kurtosis(oh.wmoments)
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -356,14 +396,15 @@ end
     add!(oh, x[, w])
     add!(oh, xs[, ws])
 
-Add a single point `x` (of weight `w`, default 1) or a vector of points `xs`
-(with a vector of weights `ws`, default all 1) to the histogram. Weights must
-be finite and nonnegative; a bad weight raises `ArgumentError` before
-anything is added. Each point updates the exact min/max and the online
-moments unconditionally; while still in the learn phase it is buffered until
-`learnLength` points have accumulated, at which point the range is fixed and
-the histograms / ASH grid are initialized from the buffer (plus padding,
-unless `integer=true`).
+Add a point `x` with weight `w` (default 1), or a collection of points `xs`
+with a vector of weights `ws` (default all 1). Weights must be finite and
+nonnegative; a bad weight raises `ArgumentError` before anything is added,
+and a `ws` of the wrong length raises `DimensionMismatch`.
+
+Every point updates the exact minimum, maximum and moments. During the learn
+phase points are buffered; when `learnLength` have arrived the range is set
+from them and they are counted. After that each point goes straight into the
+histograms and the ASH grid.
 
 Weights never change the unweighted results (`exactHistogram`, `density`,
 `moment`, `nobs`, ...); they feed the weighted ones beside them
@@ -444,14 +485,11 @@ tally!(oh::StreamHist, x::Float64, w::Float64) = tally!(oh, oh.hist, oh.whist, o
 """
     tally!(oh, x, w)
 
-Count point `x` (weight `w`) in the histograms and, unless `integer`, in the
-ASH grid. A point outside the histogram's edges is tallied in the
-underflow/overflow counts and weights instead of being dropped
-(`StatsBase.Histogram`'s `push!` silently no-ops on it), so
-`sum(exactHistogram(oh).weights) + under + over == nobs(oh)` always holds
-exactly, and a range that turns out too narrow is visible instead of
-silently distorting the edge bins. On the ASH grid, `x` goes to the nearest
-grid point; a point off the grid is not on it.
+Count point `x` (weight `w`) in the histograms and, unless `integer`, at the
+nearest ASH grid point. A point outside the histogram's edges goes into the
+underflow or overflow count and weight instead (`StatsBase.Histogram`'s
+`push!` would silently drop it). A point more than half a grid step beyond
+either end of the grid is not on the grid.
 """
 function tally!(oh::StreamHist, h::Histogram, wh::Histogram, grid, x::Float64, w::Float64)
     idx = StatsBase.binindex(h, x)
@@ -492,7 +530,9 @@ end
 """
     exactHistogram(oh)
 
-The underlying `StatsBase.Histogram` (edges + raw counts).
+The traditional histogram: a `StatsBase.Histogram` of the bin counts. Needs
+the range set (see `finalize!`). Points outside the range are in
+`outofrange(oh)`, not in the edge bins.
 """
 exactHistogram(oh::StreamHist) = requireinitialized(oh).hist
 
