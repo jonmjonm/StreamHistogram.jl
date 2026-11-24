@@ -230,9 +230,9 @@ ninrange(oh::StreamHist) = nobs(oh) - oh.underflowCount - oh.overflowCount
 "Sum of the weights of the points inside the histogram's range."
 inrangeweight(oh::StreamHist) = totalweight(oh) - oh.underflowWeight - oh.overflowWeight
 
-"The exact mean of every point added."
+"The exact mean of every point added; `NaN` before any point."
 Statistics.mean(oh::StreamHist) = mean(oh.moments)
-"The exact population variance `Σ(x - mean)² / n` of every point added (no `n - 1` correction)."
+"The exact population variance `Σ(x - mean)² / n` of every point added (no `n - 1` correction); `NaN` before any point."
 variance(oh::StreamHist) = variance(oh.moments)
 "The square root of `variance(oh)`."
 Statistics.std(oh::StreamHist) = std(oh.moments)
@@ -256,7 +256,7 @@ kurtosis(oh::StreamHist) = kurtosis(oh.moments)
     moment(oh, p)
 
 Order-`p` moment (mean for `p == 1`, population central moment for `p >= 2`).
-`p` must be one of `oh.momentPowers`.
+`p` must be one of `oh.momentPowers`. `NaN` before any point.
 """
 function moment(oh::StreamHist, p::Integer)
     p in oh.momentPowers || throw(ArgumentError("power $p was not requested in momentPowers"))
@@ -276,17 +276,14 @@ this is `moment(oh, p)`. `NaN` while the total weight is 0.
 """
 function weightedMoment(oh::StreamHist, p::Integer)
     p in oh.momentPowers || throw(ArgumentError("power $p was not requested in momentPowers"))
-    return wcentralmoment(oh, p)
+    return centralmoment(oh.wmoments, p)
 end
 
-# Every weighted moment, the mean included, is NaN while the total weight is 0.
-wcentralmoment(oh::StreamHist, p::Integer) = totalweight(oh) == 0 ? NaN : centralmoment(oh.wmoments, p)
-
 "`Dict` of every requested power => its weighted moment (see `weightedMoment`)."
-weightedMoments(oh::StreamHist) = Dict(p => wcentralmoment(oh, p) for p in oh.momentPowers)
+weightedMoments(oh::StreamHist) = Dict(p => centralmoment(oh.wmoments, p) for p in oh.momentPowers)
 
 "The weighted mean `Σwx / Σw`; `NaN` while the total weight is 0."
-weightedMean(oh::StreamHist) = wcentralmoment(oh, 1)
+weightedMean(oh::StreamHist) = mean(oh.wmoments)
 "The weighted population variance `Σw(x - mean)² / Σw`; `NaN` while the total weight is 0."
 weightedVariance(oh::StreamHist) = variance(oh.wmoments)
 "The square root of `weightedVariance(oh)`."
@@ -486,10 +483,11 @@ tally!(oh::StreamHist, x::Float64, w::Float64) = tally!(oh, oh.hist, oh.whist, o
     tally!(oh, x, w)
 
 Count point `x` (weight `w`) in the histograms and, unless `integer`, at the
-nearest ASH grid point. A point outside the histogram's edges goes into the
-underflow or overflow count and weight instead (`StatsBase.Histogram`'s
-`push!` would silently drop it). A point more than half a grid step beyond
-either end of the grid is not on the grid.
+nearest ASH grid point. A point outside the histogram's range goes into the
+underflow or overflow count and weight instead, and not on the grid
+(`StatsBase.Histogram`'s `push!` would silently drop it). So the grid holds
+exactly the points the histogram does, and the density describes the same
+points that `histogram(oh, bins)` scales it by.
 """
 function tally!(oh::StreamHist, h::Histogram, wh::Histogram, grid, x::Float64, w::Float64)
     idx = StatsBase.binindex(h, x)
@@ -502,10 +500,9 @@ function tally!(oh::StreamHist, h::Histogram, wh::Histogram, grid, x::Float64, w
     else
         h.weights[idx] += 1
         wh.weights[idx] += w
-    end
-    if grid !== nothing                                # no grid in integer mode
-        k = floor(Int, (x - first(grid)) * inv(step(grid)) + 1.5)
-        if 1 <= k <= length(grid)
+        if grid !== nothing                            # no grid in integer mode
+            # the nearest grid point; clamped only against rounding, since the grid spans the histogram's range
+            k = clamp(floor(Int, (x - first(grid)) * inv(step(grid)) + 1.5), 1, length(grid))
             oh.gridCounts[k] += 1
             oh.gridWeights[k] += w
         end

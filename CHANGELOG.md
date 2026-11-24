@@ -27,6 +27,10 @@
   - the `finalized` state is gone: the densities are always current, readable as soon as the range is fixed.
     `finalize!` still ends the learn phase early, and is a no-op afterwards.
   - the default kernel is `StreamHistogram.biweight` (the same function).
+- Fix: the ASH grid holds only the points inside the histogram's range. Before, points up to half a grid step
+  outside it, and a point exactly at the top with `closed=:left`, were on the grid but counted as out of range by
+  the histogram, so the density described slightly different points than `histogram(oh, bins)` scaled it by.
+- Every moment of an empty `StreamHist` or `MomentAccumulator` is `NaN`; `mean` was 0.0.
 - Fix: `histogram(oh, bins)` scales the density by the number of points inside the range (what the density is
   normalized over), not by `nobs(oh)`, which also counts points outside it.
 
