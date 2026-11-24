@@ -369,3 +369,4 @@ end
 include("correctness.jl")
 include("weights.jl")
 include("cdf.jl")
+include("quantile.jl")

@@ -135,6 +135,22 @@ is 3 for a normal distribution. They need the highest tracked order to be at
 least 2, 2, 3 and 4 respectively. Every moment, the mean included, is `NaN`
 before any point is added.
 
+## Quantiles
+
+`quantile(oh, p)` estimates the value below which a fraction `p` of the points
+lie (`p` a number or a vector); `weightedQuantile(oh, p)` does the same for a
+fraction of the total weight. Both come from the traditional histogram, not the
+density, so they work in integer mode too:
+
+- within a bin the points are taken to be spread evenly, so the estimate is
+  interpolated between the bin's edges; in integer mode it is the bin's integer
+  (the inverse of the empirical CDF);
+- `p = 0` and `p = 1` give the exact minimum and maximum;
+- a quantile that falls among the points outside the range is interpolated
+  across all of them, from the exact minimum to the bottom edge (or the top edge
+  to the exact maximum): a much coarser estimate, so one outside the histogram's
+  edges deserves less trust.
+
 ## Weights
 
 `add!(oh, x, w)` and `add!(oh, xs, ws)` add points with weights, which must be
@@ -146,6 +162,7 @@ unweighted results, because each tally is kept twice:
 | `nobs(oh)` | `totalweight(oh)` |
 | `exactHistogram(oh)` (count per bin) | `weightedHistogram(oh)` (sum of weights per bin) |
 | `density(oh)`, `cdf(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedCdf(oh)`, `weightedHistogram(oh, bins)` |
+| `quantile(oh, p)` | `weightedQuantile(oh, p)` |
 | `moment(oh, p)`, `moments`, `mean`, `variance`, `std`, `skewness`, `kurtosis` | `weightedMoment(oh, p)`, `weightedMoments`, `weightedMean`, `weightedVariance`, `weightedStd`, `weightedSkewness`, `weightedKurtosis` |
 | `outofrange(oh)` | `outofrangeweight(oh)` |
 | `densityQuality(oh)` | `weightedDensityQuality(oh)` |
@@ -229,6 +246,7 @@ StreamHist(;
 | **Histograms** | |
 | `exactHistogram(oh)`, `weightedHistogram(oh)` | the bin counts and the bin weight sums, as `StatsBase.Histogram`s |
 | `meanWeight(oh)` | `(edges=, meanweight=)`: each bin's mean weight |
+| `quantile(oh, p)`, `weightedQuantile(oh, p)` | estimated quantiles, from the bins (see [Quantiles](#quantiles)) |
 | `histogram(oh, bins)`, `weightedHistogram(oh, bins)` | `(edges=, weights=)`: expected counts or weights in any bins, from the density |
 | **Density** (not in integer mode; take `m=` and `kernel=`) | |
 | `density(oh)`, `weightedDensity(oh)` | the density, as a function of `x` |
