@@ -558,6 +558,63 @@ function meanWeight(oh::StreamHist)
 end
 
 """
+    quantile(oh, p)
+
+The estimated `p`-quantile of the points (`0 <= p <= 1`; `p` may also be a
+vector), from the traditional histogram: the value below which a fraction `p`
+of the points lie. Within a bin, the points are taken to be spread evenly, so
+the estimate is interpolated linearly between the bin's edges; in integer mode
+it is the integer of the bin. `p = 0` and `p = 1` give the exact minimum and
+maximum (`datarange`).
+
+If the quantile falls among the points outside the range (`outofrange`), the
+estimate is interpolated across all of them, from the exact minimum to the
+bottom edge or from the top edge to the exact maximum: far coarser than a bin,
+so an estimate outside the histogram's edges deserves less trust. `NaN` before
+any point. Needs the range set (see `finalize!`).
+"""
+Statistics.quantile(oh::StreamHist, p::Real) =
+    binquantile(oh, p, nobs(oh), outofrange(oh), exactHistogram(oh).weights)
+Statistics.quantile(oh::StreamHist, p::AbstractVector{<:Real}) = [quantile(oh, x) for x in p]
+
+"""
+    weightedQuantile(oh, p)
+
+`quantile(oh, p)` for the weighted data: the value below which a fraction `p`
+of the total weight lies, from `weightedHistogram(oh)` and
+`outofrangeweight(oh)`. `p = 0` and `p = 1` give the exact minimum and maximum
+of every point, including any of weight 0. `NaN` while the total weight is 0.
+"""
+weightedQuantile(oh::StreamHist, p::Real) =
+    binquantile(oh, p, totalweight(oh), outofrangeweight(oh), weightedHistogram(oh).weights)
+weightedQuantile(oh::StreamHist, p::AbstractVector{<:Real}) = [weightedQuantile(oh, x) for x in p]
+
+# The p-quantile of `total` (a count or a weight): `outside` below and above the range, `inbins` in the bins.
+function binquantile(oh::StreamHist, p::Real, total, outside, inbins)
+    0 <= p <= 1 || throw(ArgumentError("the quantile's probability must be in [0, 1], got $p"))
+    total == 0 && return NaN
+    mn, mx = datarange(oh)
+    p == 0 && return mn
+    p == 1 && return mx
+    edges = only(exactHistogram(oh).edges)
+    under, over = outside
+    target = p * total
+    target <= under && return snap(oh, mn + (under == 0 ? 0.0 : target / under) * (first(edges) - mn))
+    below = under                                  # the total below the current bin
+    for (k, inbin) in enumerate(inbins)
+        if target <= below + inbin
+            oh.integer && return Float64(edges[k])
+            return edges[k] + (inbin == 0 ? 0.0 : (target - below) / inbin) * (edges[k + 1] - edges[k])
+        end
+        below += inbin
+    end
+    return snap(oh, last(edges) + (over == 0 ? 0.0 : (target - below) / over) * (mx - last(edges)))
+end
+
+# An estimate among the out-of-range points: an integer in integer mode.
+snap(oh::StreamHist, x::Float64) = oh.integer ? round(x) : x
+
+"""
     smoothgrid(cellsums, grid, kernel, m)
 
 The ASH of per-grid-cell totals `cellsums` (counts, or sums of weights) on

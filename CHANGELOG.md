@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **`quantile(oh, p)` and `weightedQuantile(oh, p)`**: estimated quantiles (`p` a number or a vector), from the
+  traditional histogram's bins, interpolated linearly within a bin (the bin's integer in integer mode), with the
+  exact minimum and maximum at `p = 0` and `1`. A quantile among the out-of-range points is interpolated across
+  all of them, a coarser estimate. Moved here from AtlasUtilities (`histQuantile`).
+
 ## 0.2.0
 
 - **Weighted points.** `add!(oh, x, w)` and `add!(oh, xs, ws)` add points with finite, nonnegative weights;
