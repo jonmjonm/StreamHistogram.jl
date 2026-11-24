@@ -12,6 +12,19 @@
 # counts points (each of weight 1); a `MomentAccumulator{Float64}` has `n` =
 # the total weight Σwᵢ, `mean` = Σwᵢxᵢ / Σwᵢ and `M[p]` = Σwᵢ(xᵢ - mean)^p.
 
+"""
+    MomentAccumulator(maxpower)
+    MomentAccumulator(Float64, maxpower)
+
+An empty accumulator of the mean and the central moments up to order
+`maxpower`, updated exactly and mergeably (Pébay's formulas; see
+momentAccumulator.md). `MomentAccumulator(maxpower)` counts points
+(`n::Int`); `MomentAccumulator(Float64, maxpower)` sums weights (`n` is the
+total weight). Fields: `n`, `mean`, and `M[p] = Σ(x - mean)^p` (weighted:
+`Σw(x - mean)^p`) for `p` in `2:maxpower`. A `StreamHist` keeps one of each;
+`nobs`, `mean`, `variance`, `std`, `skewness` and `kurtosis` work on it
+directly.
+"""
 struct MomentAccumulator{T<:Real}
     n::T
     mean::Float64

@@ -46,9 +46,10 @@ two directions this package actually needs:
    into the accumulator for their union, expressed in terms of the *shift*
    between their means rather than the means' absolute values.
 
-That merge is the whole implementation. A single point is just a batch of
-size 1 whose own central moments are trivially zero, so `add!` for a point
-and `add!` for a batch are literally the same code path.
+That merge is the whole implementation. A single point is a batch of size 1
+whose own central moments are zero, so adding one point is the merge with
+that batch; `addpoint` is the same formula with those zero terms removed
+algebraically (the test suite checks the two agree).
 
 ## The merge formula
 
@@ -113,7 +114,7 @@ all zeros — serve as the identity element that batches merge into.
   itself) and `M[p] / n` for $p \geq 2$ (the population moment; no $n-1$
   correction).
 
-Because `moment_powers` can be a sparse set (e.g. `[1, 2, 4, 8]`), the
+Because `momentPowers` can be a sparse set (e.g. `[1, 2, 4, 8]`), the
 accumulator internally still carries the full ladder $M_2, \ldots,
 M_{\text{max}}$ — the recurrence for $M_p$ depends on all the lower orders,
 not just the ones a caller asked to see. That's a handful of extra

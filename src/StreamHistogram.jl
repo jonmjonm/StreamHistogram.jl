@@ -1,3 +1,10 @@
+"""
+    StreamHistogram
+
+Histograms, densities and exact moments of data arriving one point or one
+batch at a time, optionally weighted. Start with `StreamHist`, `add!` and the
+README.
+"""
 module StreamHistogram
 
 using Statistics
