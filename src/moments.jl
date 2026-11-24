@@ -23,7 +23,7 @@ momentAccumulator.md). `MomentAccumulator(maxpower)` counts points
 total weight). Fields: `n`, `mean`, and `M[p] = Σ(x - mean)^p` (weighted:
 `Σw(x - mean)^p`) for `p` in `2:maxpower`. A `StreamHist` keeps one of each;
 `nobs`, `mean`, `variance`, `std`, `skewness` and `kurtosis` work on it
-directly.
+directly, and are `NaN` while `n` is 0.
 """
 struct MomentAccumulator{T<:Real}
     n::T
@@ -210,16 +210,15 @@ addbatch(A::MomentAccumulator{Float64}, xs::AbstractVector{<:Real}, ws::Abstract
     centralmoment(A, p)
 
 Return the order-`p` moment: the mean for `p == 1`, else the population
-central moment `M[p] / n`.
+central moment `M[p] / n`. `NaN` while `n` is 0.
 """
 function centralmoment(A::MomentAccumulator, p::Integer)
-    p == 1 && return A.mean
-    (2 <= p <= maxpower(A)) || throw(ArgumentError("moment order $p not tracked (max = $(maxpower(A)))"))
+    (1 <= p <= maxpower(A)) || throw(ArgumentError("moment order $p not tracked (max = $(maxpower(A)))"))
     A.n == 0 && return NaN
-    return A.M[p] / A.n
+    return p == 1 ? A.mean : A.M[p] / A.n
 end
 
-Statistics.mean(A::MomentAccumulator) = A.mean
+Statistics.mean(A::MomentAccumulator) = centralmoment(A, 1)
 StatsBase.nobs(A::MomentAccumulator) = A.n
 variance(A::MomentAccumulator) = centralmoment(A, 2)
 Statistics.std(A::MomentAccumulator) = sqrt(variance(A))

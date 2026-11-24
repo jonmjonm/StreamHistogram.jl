@@ -84,7 +84,9 @@ moments, minimum and maximum always include every point.
 
 ## The density
 
-Adding a point increments its nearest ASH grid point's count and weight sum.
+Adding a point inside the range increments its nearest ASH grid point's count
+and weight sum; points outside the range are only in `outofrange`, so the
+grid holds exactly the points the histogram does.
 The grid has `ashNGrid + 1` points (default 501) across the range. The density
 is computed from the grid when it is read: each grid point's count is spread
 over its neighbours `i` by `kernel((i - k) / m)`, a kernel `kernel` (default
@@ -130,7 +132,8 @@ that do depend on a bin width, a smoothing width and a range:
 `[1, 2, 4, 8]`). `variance`, `std`, `skewness` and `kurtosis` are population
 values (no `n - 1` correction), and `kurtosis` is not the excess kurtosis: it
 is 3 for a normal distribution. They need the highest tracked order to be at
-least 2, 2, 3 and 4 respectively.
+least 2, 2, 3 and 4 respectively. Every moment, the mean included, is `NaN`
+before any point is added.
 
 ## Weights
 

@@ -115,3 +115,50 @@ end
 
     @test_throws ArgumentError StreamHist(ashNGrid=0)
 end
+
+@testset "the grid holds exactly the points the histogram does" begin
+    lo, hi = 0.0, 1.0
+    half = (hi - lo) / 500 / 2                                     # half a grid step (ashNGrid = 500)
+    edge = [lo - half / 2, hi, hi + half / 2]                      # just outside, or at the top (closed=:left)
+    oh = StreamHist(binRange=(lo, hi))
+    add!(oh, edge, [1.0, 2.0, 3.0])
+    @test outofrange(oh) == (underflow=1, overflow=2)
+    @test sum(oh.gridCounts) == 0 && sum(oh.gridWeights) == 0
+    @test isnan(density(oh)(0.5))                                  # no point in range: no density, as histogram says
+    @test histogram(oh, [lo, hi]).weights == [0.0]
+
+    right = StreamHist(binRange=(lo, hi), closed=:right)           # now lo is outside and hi inside
+    add!(right, [lo, hi])
+    @test outofrange(right) == (underflow=1, overflow=0)
+    @test oh.grid == right.grid && right.gridCounts[end] == 1 && sum(right.gridCounts) == 1
+
+    # many points around the range, one at a time and in a batch, weighted
+    Random.seed!(44)
+    xs = 1.2 .* randn(5000)
+    ws = rand(5000)
+    for (bins, closed) in ((nothing, :left), (nothing, :right), ([-1.5, -0.2, 0.7, 2.0], :left))
+        a = bins === nothing ? StreamHist(binRange=(-2.0, 2.0); closed) : StreamHist(; bins, closed)
+        add!(a, xs[1:2000], ws[1:2000])
+        foreach(i -> add!(a, xs[i], ws[i]), 2001:5000)
+        under, over = outofrange(a)
+        @test under > 0 && over > 0
+        @test sum(a.gridCounts) == nobs(a) - under - over == sum(exactHistogram(a).weights)
+        @test sum(a.gridWeights) ≈ totalweight(a) - sum(outofrangeweight(a))
+        @test sum(histogram(a, [first(a.grid), last(a.grid)]).weights) ≈ sum(exactHistogram(a).weights)
+    end
+end
+
+@testset "every moment, the mean included, is NaN before any point" begin
+    oh = StreamHist(binRange=(0.0, 1.0))
+    @test isnan(mean(oh)) && isnan(variance(oh)) && isnan(std(oh)) && isnan(skewness(oh)) && isnan(kurtosis(oh))
+    @test all(isnan, values(moments(oh))) && all(p -> isnan(moment(oh, p)), oh.momentPowers)
+    @test isnan(weightedMean(oh)) && all(isnan, values(weightedMoments(oh)))
+    @test isnan(mean(MomentAccumulator(4))) && isnan(mean(MomentAccumulator(Float64, 4)))
+    @test_throws ArgumentError StreamHistogram.centralmoment(MomentAccumulator(4), 5)
+    add!(oh, 0.25)
+    @test mean(oh) == 0.25 && variance(oh) == 0.0
+    # a point of weight 0 counts, but adds no weight
+    z = StreamHist(binRange=(0.0, 1.0))
+    add!(z, 0.5, 0.0)
+    @test mean(z) == 0.5 && isnan(weightedMean(z))
+end
