@@ -6,9 +6,14 @@
 # M.M[p] holds Σ(xᵢ - mean)^p for p = 2:maxpower. M.M[1] is unused (always 0,
 # since the first central moment is trivially zero) — the mean is tracked
 # separately and stands in for "moment order 1".
+#
+# Weighted data (Pébay, Terriberry, Kolla & Bennett 2016): the same formulas
+# hold with every count replaced by a sum of weights. A `MomentAccumulator{Int}`
+# counts points (each of weight 1); a `MomentAccumulator{Float64}` has `n` =
+# the total weight Σwᵢ, `mean` = Σwᵢxᵢ / Σwᵢ and `M[p]` = Σwᵢ(xᵢ - mean)^p.
 
-struct MomentAccumulator
-    n::Int
+struct MomentAccumulator{T<:Real}
+    n::T
     mean::Float64
     M::Vector{Float64}
     # binom[p, k] = binomial(p, k), for p in 2:maxpower, k in 1:(p-2); built
@@ -25,8 +30,9 @@ function binomtable(maxp::Integer)
     return T
 end
 
-MomentAccumulator(maxpower::Integer) =
-    MomentAccumulator(0, 0.0, zeros(Float64, maxpower), binomtable(maxpower))
+MomentAccumulator(maxpower::Integer) = MomentAccumulator(Int, maxpower)
+MomentAccumulator(::Type{T}, maxpower::Integer) where {T<:Real} =
+    MomentAccumulator{T}(zero(T), 0.0, zeros(Float64, maxpower), binomtable(maxpower))
 
 maxpower(A::MomentAccumulator) = length(A.M)
 
@@ -51,6 +57,29 @@ function batchaccumulator(xs::AbstractVector{<:Real}, maxp::Integer)
 end
 
 """
+    batchaccumulator(xs, ws, maxp)
+
+The weighted accumulator (`MomentAccumulator{Float64}`) of points `xs` with
+weights `ws`: total weight Σw, mean Σwx/Σw, and M[p] = Σw(x - mean)^p.
+"""
+function batchaccumulator(xs::AbstractVector{<:Real}, ws::AbstractVector{<:Real}, maxp::Integer)
+    W = sum(Float64, ws; init=0.0)
+    W == 0 && return MomentAccumulator(Float64, maxp)
+    μ = sum(Float64(w) * Float64(x) for (x, w) in zip(xs, ws)) / W
+    M = zeros(Float64, maxp)
+    @inbounds for (x, w) in zip(xs, ws)
+        d = Float64(x) - μ
+        dp = d * d
+        M[2] += w * dp
+        for p in 3:maxp
+            dp *= d
+            M[p] += w * dp
+        end
+    end
+    return MomentAccumulator{Float64}(W, μ, M, binomtable(maxp))
+end
+
+"""
     mergeaccumulators(A, B)
 
 Combine two independently-computed `MomentAccumulator`s into the accumulator
@@ -61,12 +90,12 @@ Chan/Golub/LeVeque parallel variance formula to arbitrary order.
 `addpoint` below instead, which is this same formula algebraically
 simplified for a size-1, all-zero-moment `B`.
 """
-function mergeaccumulators(A::MomentAccumulator, B::MomentAccumulator)
+function mergeaccumulators(A::MomentAccumulator{T}, B::MomentAccumulator{T}) where {T}
     maxp = maxpower(A)
     maxp == maxpower(B) || throw(ArgumentError("accumulators must track the same moment orders"))
     nA, nB = A.n, B.n
     n = nA + nB
-    n == 0 && return MomentAccumulator(maxp)
+    n == 0 && return MomentAccumulator(T, maxp)
     nA == 0 && return B
     nB == 0 && return A
 
@@ -105,6 +134,15 @@ function mergeaccumulators(A::MomentAccumulator, B::MomentAccumulator)
 end
 
 """
+    addpoint(A, x, w)
+
+Add one point `x` of weight `w` to a weighted accumulator: the merge with a
+one-point accumulator of total weight `w` (and all central moments zero).
+"""
+addpoint(A::MomentAccumulator{Float64}, x::Real, w::Real) =
+    mergeaccumulators(A, MomentAccumulator{Float64}(Float64(w), Float64(x), zeros(Float64, maxpower(A)), A.binom))
+
+"""
     addpoint(A, x)
 
 `mergeaccumulators(A, B)` specialized for a single new point (`B` of size 1,
@@ -116,7 +154,7 @@ the general `mergeaccumulators` path in the test suite.
 function addpoint(A::MomentAccumulator, x::Real)
     maxp = maxpower(A)
     x = Float64(x)
-    A.n == 0 && return MomentAccumulator(1, x, zeros(Float64, maxp), A.binom)
+    A.n == 0 && return MomentAccumulator(oneunit(A.n), x, zeros(Float64, maxp), A.binom)
 
     nA = A.n
     n = nA + 1
@@ -152,6 +190,8 @@ end
 
 addbatch(A::MomentAccumulator, xs::AbstractVector{<:Real}) =
     mergeaccumulators(A, batchaccumulator(xs, maxpower(A)))
+addbatch(A::MomentAccumulator{Float64}, xs::AbstractVector{<:Real}, ws::AbstractVector{<:Real}) =
+    mergeaccumulators(A, batchaccumulator(xs, ws, maxpower(A)))
 
 """
     centralmoment(A, p)

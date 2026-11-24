@@ -24,10 +24,10 @@ Random.seed!(1234)
     fleft, fright = density(left), density(right)
     expected = first(QuadGK.quadgk(x -> abs(fleft(x) - fright(x)), 0.0, 3.0)) / 2
     @test tv_distance(left, right) ≈ expected atol=1e-8
-    @test tv_distance(left.ash, right.ash) ≈ tv_distance(left, right) atol=1e-10
+    @test tv_distance(left, right; weighted=true) ≈ tv_distance(left, right) atol=1e-10   # no weights given
     @test lp_distance(left, right; p=1) ≈ 2 * tv_distance(left, right) atol=1e-10
     expected_l2 = sqrt(first(QuadGK.quadgk(x -> abs(fleft(x) - fright(x))^2, 0.0, 3.0)))
-    @test lp_distance(left.ash, right.ash; p=2) ≈ expected_l2 atol=1e-8
+    @test lp_distance(left, right; p=2) ≈ expected_l2 atol=1e-8
     @test_throws ArgumentError lp_distance(left, right; p=0)
     @test tv_distance(left, right) ≈ tv_distance(right, left) atol=1e-10
     @test_throws ArgumentError tv_distance(StreamHist(learn=false, binRange=(0.0, 1.0)), left)
@@ -138,50 +138,32 @@ end
     @test d(0.0) > 0
     @test d(100.0) == 0.0  # far outside range
 
-    # add! after finalize un-finalizes
-    add!(oh, 0.5)
-    @test !oh.finalized
-    @test_throws ArgumentError density(oh)
-    finalize!(oh)
-    @test oh.finalized
-    @test nobs(oh) == 2001
+    # points can be added after reading; the density read next includes them
+    before = density(oh)(0.5)
+    add!(oh, fill(0.5, 500))
+    @test nobs(oh) == 2500
+    @test density(oh)(0.5) > before
+    @test finalize!(oh) === oh                    # a no-op once the range is fixed
 end
 
-@testset "ASH micro-batching for scalar add!" begin
-    oh = StreamHist(binRange=(-6.0, 6.0), binNum=100, ashBatchSize=50)
-
-    # fewer points than ashBatchSize: nothing flushed to the ASH yet
-    for x in randn(10)
-        add!(oh, x)
-    end
-    @test length(oh.ashPending) == 10
-    @test nobs(oh.ash) == 0
-
-    # crossing ashBatchSize triggers an automatic flush
-    for x in randn(45)
-        add!(oh, x)
-    end
-    @test nobs(oh.ash) >= 50
-    @test length(oh.ashPending) < 50
-
-    # finalize! flushes whatever's left pending, regardless of batch size
-    n_before = nobs(oh)
-    finalize!(oh)
-    @test isempty(oh.ashPending)
-    @test nobs(oh.ash) == n_before
-    @test oh.finalized
-
-    d = density(oh)
-    @test d(0.0) > 0
+@testset "single-point add! and batch add! give the same grid and density" begin
+    data = randn(3000)
+    a, b = StreamHist(binRange=(-6.0, 6.0), binNum=100), StreamHist(binRange=(-6.0, 6.0), binNum=100)
+    foreach(x -> add!(a, x), data)
+    add!(b, data)
+    @test a.gridCounts == b.gridCounts && sum(a.gridCounts) == count(x -> -6.0 <= x <= 6.0, data)
+    @test densityGrid(a).density == densityGrid(b).density
+    @test density(a)(0.0) > 0                     # readable straight away: no finalize! needed with a range
 end
 
-@testset "density/histogram/densityQuality require finalize!" begin
-    oh = StreamHist(binRange=(-6.0, 6.0), binNum=50)
+@testset "density/histogram/densityQuality need the range fixed (finalize! ends the learn phase)" begin
+    oh = StreamHist(learnLength=10_000, binNum=50)
     add!(oh, randn(1000))
-    @test !oh.finalized
-    @test_throws ArgumentError density(oh)
+    @test !isinitialized(oh)
+    for read in (density, weightedDensity, densityQuality, densityGrid, exactHistogram, weightedHistogram, meanWeight)
+        @test_throws ArgumentError read(oh)
+    end
     @test_throws ArgumentError histogram(oh, collect(-6.0:1.0:6.0))
-    @test_throws ArgumentError densityQuality(oh)
 
     finalize!(oh)
     @test density(oh)(0.0) > 0
@@ -270,7 +252,6 @@ end
     @test !isinitialized(oh)
     finalize!(oh)
     @test isinitialized(oh)
-    @test oh.finalized
     @test nobs(oh) == 50
 end
 
@@ -386,3 +367,4 @@ end
 end
 
 include("correctness.jl")
+include("weights.jl")

@@ -136,3 +136,17 @@ ASH is far coarser than that), but worth knowing it's not the ~15-digit
 agreement you'd get at $p=2$. High-order central moments are just
 inherently more sensitive to floating-point error than low-order ones,
 independent of the algorithm.
+
+## Weighted points
+
+Every formula above holds unchanged for weighted points once each count is
+replaced by a sum of weights (Pébay, Terriberry, Kolla & Bennett, 2016,
+*Numerically stable, scalable formulas for parallel and online computation of
+higher-order multivariate central moments with arbitrary weights*). A
+`MomentAccumulator{Float64}` stores $n = W = \sum_i w_i$, the weighted mean
+$\mu = \sum_i w_i x_i / W$, and $M_p = \sum_i w_i (x_i - \mu)^p$. Merging two
+accumulators is the same merge with $n_A, n_B$ the two weight totals, and adding
+one point $x$ of weight $w$ is the merge with a one-point accumulator of total
+weight $w$ (all of whose central moments are zero). The moments reported are
+$M_p / W$, the population moments of the weighted data. A `MomentAccumulator{Int}`
+is the unweighted case, every weight 1; a `StreamHist` keeps one of each.
