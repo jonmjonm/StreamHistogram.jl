@@ -80,7 +80,7 @@ unweighted results: each tally is kept twice, side by side.
 |---|---|
 | `nobs(oh)` | `totalweight(oh)` |
 | `exactHistogram(oh)` (counts per bin) | `weightedHistogram(oh)` (sum of weights per bin) |
-| `density(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedHistogram(oh, bins)` |
+| `density(oh)`, `cdf(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedCdf(oh)`, `weightedHistogram(oh, bins)` |
 | `moment(oh, p)`, `mean`, `variance`, `std`, `skewness`, `kurtosis` | `weightedMoment(oh, p)`, `weightedMean`, `weightedVariance`, `weightedStd`, `weightedSkewness`, `weightedKurtosis` |
 | `outofrange(oh)` | `outofrangeweight(oh)` |
 | `densityQuality(oh)` | `weightedDensityQuality(oh)` |
@@ -181,8 +181,8 @@ StreamHist(;
     binNum       = 50,              # number of traditional-histogram bins
     bins         = nothing,         # explicit edges; overrides binRange/binNum
     closed       = :left,           # StatsBase.Histogram bin closedness
-    kernel       = StreamHistogram.biweight,   # ASH kernel, any function of u
-    m            = 5,               # ASH smoothing width, in grid cells
+    kernel       = StreamHistogram.biweight,   # default ASH kernel, any function of u
+    m            = 5,               # default ASH smoothing width, in grid cells
     ashNGrid     = 500,             # the ASH grid has ashNGrid + 1 points over the range
 )
 ```
@@ -201,6 +201,22 @@ the two agree to 1e-12), but on our own grid, which holds weights as well as
 counts and needs no batching of single-point `add!`s: reading is always
 current.
 
+`density(oh)` interpolates linearly between the grid points and is
+normalized so that it integrates to exactly 1 over the range; `cdf(oh)` is
+its exact integral (the interpolation is piecewise linear, so the integral is
+piecewise quadratic), and `histogram(oh, bins)` takes differences of it.
+
+Because the raw grid is kept, the smoothing can be changed when reading,
+without rebuilding: the density readers (`densityGrid`, `density`,
+`weightedDensity`, `cdf`, `weightedCdf`, `histogram(oh, bins)`,
+`weightedHistogram(oh, bins)`) take `m=` and `kernel=`, defaulting to the
+ones `oh` was built with:
+
+```julia
+density(oh; m=20)                          # smoother
+cdf(oh; kernel=u -> exp(-u^2 / 2), m=3)    # a gaussian kernel
+```
+
 ## Functions
 
 - `add!(oh, x[, w])`, `add!(oh, xs[, ws])` — add a point or a vector of
@@ -209,18 +225,24 @@ current.
   in the buffer, so the histograms and densities can be read. A no-op once
   the range is fixed; points can still be added afterwards.
 - `density(oh)` — a callable `x -> density(x)`, linearly interpolating the
-  ASH. Errors in integer mode, and while the range is not yet fixed.
+  ASH; it integrates to 1. Errors in integer mode, and while the range is not
+  yet fixed.
+- `cdf(oh)` — a callable `x -> cdf(x)`, the exact integral of `density(oh)`
+  up to `x`: 0 below the range, 1 from its top up.
 - `densityGrid(oh; weighted=false)` — `(grid=, density=)`, the ASH at its grid
   points.
+- The density readers take `m=` and `kernel=` to smooth with another width or
+  kernel than the ones `oh` was built with; see
+  [How the ASH is computed](#how-the-ash-is-computed).
 - `densityQuality(oh)` — for each requested moment power (in the order of
   `oh.momentPowers`), numerically integrates the ASH density against
   `(x-mean)^p` and compares it to the true moment accumulator value; returns
   a `Vector{Float64}` of the relative error between the two estimates.
 - `exactHistogram(oh)` — the underlying `StatsBase.Histogram` (edges + raw
   counts).
-- `histogram(oh, bins)` — integrates `density(oh)` between an arbitrary set
-  of edges (scaled by the number of points in range) to produce expected
-  counts over bins that needn't match the ones `oh` was built with.
+- `histogram(oh, bins)` — integrates `density(oh)` exactly between an
+  arbitrary set of edges (scaled by the number of points in range) to produce
+  expected counts over bins that needn't match the ones `oh` was built with.
 - `moment(oh, p)` / `moments(oh)` — the order-`p` moment (mean for `p==1`,
   population central moment for `p>=2`), or all requested moments as a
   `Dict`.
@@ -237,7 +259,7 @@ current.
   — L^p and total-variation distances between two histograms' ASH densities
   (weighted densities if `weighted`).
 - The weighted counterparts (`totalweight`, `weightedHistogram`,
-  `weightedDensity`, `weightedMoment`, `weightedMoments`, `weightedMean`, ...,
+  `weightedDensity`, `weightedCdf`, `weightedMoment`, `weightedMoments`, `weightedMean`, ...,
   `outofrangeweight`, `weightedDensityQuality`), `meanWeight(oh)` and
   `effectivesamplesize(oh)` — see [Weights](#weights).
 
@@ -259,7 +281,9 @@ finalize!(oh)
 mean(oh), variance(oh), skewness(oh)
 exactHistogram(oh)
 outofrange(oh)  # (underflow=, overflow=) -- check this if the learned range looks too narrow
-d = density(oh)
+d = density(oh)                 # d(x) at any x
+F = cdf(oh)                     # F(b) - F(a): the estimated fraction of points in (a, b]
+density(oh; m=20)               # the same data, smoothed more
 densityQuality(oh)
 
 # weighted points, e.g. importance weights

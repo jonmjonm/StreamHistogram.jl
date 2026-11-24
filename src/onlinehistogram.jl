@@ -93,7 +93,8 @@ point counts once) and weighted (every point counts its weight).
   above).
 - `ashNGrid`, `kernel`, `m`: the ASH grid has `ashNGrid + 1` points over the
   range; each grid cell's total is spread over its neighbours `i` by
-  `kernel((i - k) / m)`.
+  `kernel((i - k) / m)`. `kernel` and `m` are only the defaults: the density
+  readers take `kernel=` and `m=` to smooth the same grid differently.
 """
 function StreamHist(;
     integer::Union{Bool,Symbol}=false,
@@ -110,6 +111,7 @@ function StreamHist(;
     ashNGrid::Integer=500,
 )
     m > 0 || throw(ArgumentError("the smoothing parameter `m` must be positive"))
+    ashNGrid > 0 || throw(ArgumentError("`ashNGrid` must be positive"))
     integerAuto = integer === :auto
     if integerAuto
         bins === nothing && binRange === nothing || throw(ArgumentError(
@@ -301,7 +303,7 @@ function initializerange!(oh::StreamHist, range::Tuple{Float64,Float64}; bins::U
         edges = bins === nothing ? collect(range_(lo, hi, oh.binNum)) : bins
         oh.hist = Histogram(edges, oh.closed)
         oh.whist = Histogram(edges, Float64, oh.closed)
-        oh.grid = range_(lo, hi, oh.ashNGrid)          # lo, hi = extrema(bins) when bins are given
+        oh.grid = Base.range(lo, hi; length=oh.ashNGrid + 1)  # lo, hi = extrema(bins) when bins are given
         oh.gridCounts = zeros(Int, length(oh.grid))
         oh.gridWeights = zeros(Float64, length(oh.grid))
     end
@@ -523,10 +525,11 @@ end
 
 The ASH of per-grid-cell totals `cellsums` (counts, or sums of weights) on
 `grid`: each cell `k`'s total spread over its neighbours `i` by
-`kernel((i - k) / m)`, then normalized to integrate to 1. All `NaN` if every
-total is 0.
+`kernel((i - k) / m)`, then normalized so that its linear interpolation
+(`density`) integrates to 1. All `NaN` if every total is 0.
 """
 function smoothgrid(cellsums::AbstractVector{<:Real}, grid::AbstractRange, kernel, m::Integer)
+    m > 0 || throw(ArgumentError("the smoothing parameter `m` must be positive"))
     b = length(grid)
     dens = zeros(Float64, b)
     for k in 1:b
@@ -536,9 +539,12 @@ function smoothgrid(cellsums::AbstractVector{<:Real}, grid::AbstractRange, kerne
             @inbounds dens[i] += c * kernel((i - k) / m)
         end
     end
-    dens .*= 1 / (sum(dens) * step(grid))
+    dens .*= 1 / trapezoid(dens, step(grid))
     return dens
 end
+
+"The integral of the linear interpolation of `y`, given at points `Δ` apart."
+trapezoid(y, Δ) = Δ * (sum(y) - (first(y) + last(y)) / 2)
 
 """Linearly interpolate density values `dens` given on `grid`; zero outside it."""
 function interpolated(grid::AbstractRange, dens::AbstractVector{Float64})
@@ -548,70 +554,113 @@ function interpolated(grid::AbstractRange, dens::AbstractVector{Float64})
     return function (x::Real)
         (x < lo || x > hi) && return 0.0
         i = clamp(floor(Int, (x - lo) / Δ) + 1, 1, n - 1)
-        x0, x1 = grid[i], grid[i + 1]
-        y0, y1 = dens[i], dens[i + 1]
-        x1 == x0 && return y0
-        return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        return dens[i] + (dens[i + 1] - dens[i]) * (x - grid[i]) / (grid[i + 1] - grid[i])
     end
 end
 
 """
-    densityGrid(oh; weighted=false)
-
-`(grid=, density=)`: the ASH density at the ASH grid points (of the weighted
-data if `weighted`), the values `density(oh)` / `weightedDensity(oh)`
-interpolate between.
+The integral from `first(grid)` to `x` of `interpolated(grid, dens)`, exactly
+(it is piecewise quadratic): 0 below the grid, the total above it.
 """
-function densityGrid(oh::StreamHist; weighted::Bool=false)
-    requiredensity(oh)
-    cells = weighted ? oh.gridWeights : oh.gridCounts
-    return (grid=oh.grid, density=smoothgrid(cells, oh.grid, oh.kernel, oh.m))
+function cumulative(grid::AbstractRange, dens::AbstractVector{Float64})
+    lo, hi = first(grid), last(grid)
+    Δ = step(grid)
+    n = length(grid)
+    upto = zeros(Float64, n)                     # the integral up to each grid point
+    for i in 2:n
+        upto[i] = upto[i - 1] + (grid[i] - grid[i - 1]) * (dens[i - 1] + dens[i]) / 2
+    end
+    return function (x::Real)
+        x < lo && return 0.0
+        x >= hi && return upto[n]
+        i = clamp(floor(Int, (x - lo) / Δ) + 1, 1, n - 1)
+        t = x - grid[i]
+        return upto[i] + t * (dens[i] + (dens[i + 1] - dens[i]) * t / (2 * (grid[i + 1] - grid[i])))
+    end
 end
 
 """
-    density(oh)
+    densityGrid(oh; weighted=false, m=oh.m, kernel=oh.kernel)
+
+`(grid=, density=)`: the ASH density at the ASH grid points (of the weighted
+data if `weighted`), the values `density(oh)` / `weightedDensity(oh)`
+interpolate between. `m` and `kernel` smooth with another width or kernel
+than the ones `oh` was built with, without changing `oh`.
+"""
+function densityGrid(oh::StreamHist; weighted::Bool=false, m::Integer=oh.m, kernel=oh.kernel)
+    requiredensity(oh)
+    cells = weighted ? oh.gridWeights : oh.gridCounts
+    return (grid=oh.grid, density=smoothgrid(cells, oh.grid, kernel, m))
+end
+
+"""
+    density(oh; m=oh.m, kernel=oh.kernel)
 
 A callable `x -> density(x)` linearly interpolating the ASH density of the
-points (each counted once), zero outside the range. Unavailable when
-`integer=true`; needs the range fixed (`finalize!(oh)` ends the learn phase).
-Every value is `NaN` if no point is inside the range.
+points (each counted once) between the grid points, zero outside the range;
+it integrates to 1. Unavailable when `integer=true`; needs the range fixed
+(`finalize!(oh)` ends the learn phase). It is a snapshot: points added later
+are in the next `density(oh)`. Every value inside the range is `NaN` if no
+point is inside it. `m` and `kernel`: see `densityGrid`.
 """
-density(oh::StreamHist) = interpolated(densityGrid(oh)...)
+density(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = interpolated(densityGrid(oh; m, kernel)...)
 
 """
-    weightedDensity(oh)
+    weightedDensity(oh; m=oh.m, kernel=oh.kernel)
 
 `density(oh)` for the weighted data: the ASH density with each point counted
-with its weight. It uses the same grid, kernel and smoothing width as
-`density(oh)`, so it equals the count density times the kernel-smoothed mean
+with its weight. With the same grid, kernel and smoothing width as
+`density(oh)`, it equals the count density times the kernel-smoothed mean
 weight `E[w | x]`, and equals `density(oh)` when no weights were given. Every
-value is `NaN` if the points in range have total weight 0.
+value inside the range is `NaN` if the points in range have total weight 0.
 """
-weightedDensity(oh::StreamHist) = interpolated(densityGrid(oh; weighted=true)...)
+weightedDensity(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
+    interpolated(densityGrid(oh; weighted=true, m, kernel)...)
 
 """
-    histogram(oh, bins)
+    cdf(oh; m=oh.m, kernel=oh.kernel)
 
-Integrates `density(oh)` between consecutive `bins` edges (scaled by the
-number of points inside the histogram's range, which is what the density is
-normalized over) to produce expected counts over an arbitrary set of edges.
+A callable `x -> cdf(x)`: the exact integral of `density(oh)` up to `x`, the
+estimated fraction of the points in range that are at most `x`. It is 0 below
+the range and 1 from its top up, and `NaN` from the bottom of the range up if
+no point is inside it. Needs what `density` needs; a snapshot like it.
 """
-histogram(oh::StreamHist, bins::AbstractVector{<:Real}) = binintegrals(density(oh), ninrange(oh), bins)
+cdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densityGrid(oh; m, kernel)...)
 
 """
-    weightedHistogram(oh, bins)
+    weightedCdf(oh; m=oh.m, kernel=oh.kernel)
 
-`histogram(oh, bins)` for the weighted data: integrates `weightedDensity(oh)`
-between consecutive `bins` edges, scaled by the total weight of the points in
-range, giving the expected weight in each bin.
+`cdf(oh)` for the weighted data: the exact integral of `weightedDensity(oh)`
+up to `x`, the estimated fraction of the in-range weight at values at most `x`.
 """
-weightedHistogram(oh::StreamHist, bins::AbstractVector{<:Real}) =
-    binintegrals(weightedDensity(oh), inrangeweight(oh), bins)
+weightedCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
+    cumulative(densityGrid(oh; weighted=true, m, kernel)...)
+
+"""
+    histogram(oh, bins; m=oh.m, kernel=oh.kernel)
+
+The expected counts over an arbitrary set of edges `bins`: the integral of
+`density(oh)` between consecutive edges (exactly, from `cdf(oh)`), scaled by
+the number of points inside the histogram's range, which is what the density
+is normalized over.
+"""
+histogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
+    binintegrals(cdf(oh; m, kernel), ninrange(oh), bins)
+
+"""
+    weightedHistogram(oh, bins; m=oh.m, kernel=oh.kernel)
+
+`histogram(oh, bins)` for the weighted data: the integral of
+`weightedDensity(oh)` between consecutive `bins` edges, scaled by the total
+weight of the points in range, giving the expected weight in each bin.
+"""
+weightedHistogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
+    binintegrals(weightedCdf(oh; m, kernel), inrangeweight(oh), bins)
 
 # With nothing in range the density is undefined (NaN), and nothing falls in any bin.
-function binintegrals(d, total, bins)
+function binintegrals(F, total, bins)
     weights = total == 0 ? zeros(length(bins) - 1) :
-              [total * first(quadgk(d, bins[i], bins[i + 1])) for i in 1:(length(bins) - 1)]
+              [total * (F(bins[i + 1]) - F(bins[i])) for i in 1:(length(bins) - 1)]
     return (edges=collect(bins), weights=weights)
 end
 

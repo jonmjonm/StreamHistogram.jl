@@ -116,10 +116,10 @@ end
     Kn, Ks = smooth(Float64.(oh.gridCounts)), smooth(oh.gridWeights)
     keep = Kn .> 0
     prod = zeros(length(Kn))
-    prod[keep] = (Kn ./ (sum(Kn) * step(rng)))[keep] .* (Ks[keep] ./ Kn[keep])
-    prod ./= sum(prod) * step(rng)
+    prod[keep] = (Kn ./ StreamHistogram.trapezoid(Kn, step(rng)))[keep] .* (Ks[keep] ./ Kn[keep])
+    prod ./= StreamHistogram.trapezoid(prod, step(rng))
     @test weightedDensity(oh).(collect(rng)) ≈ prod rtol=1e-10
-    @test density(oh).(collect(rng)) ≈ Kn ./ (sum(Kn) * step(rng)) rtol=1e-10
+    @test density(oh).(collect(rng)) ≈ Kn ./ StreamHistogram.trapezoid(Kn, step(rng)) rtol=1e-10
 
     # the weighted density moves toward large x; the unweighted one does not
     @test weightedMean(oh) > mean(oh) + 0.5

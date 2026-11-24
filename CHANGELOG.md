@@ -10,6 +10,14 @@
   `meanWeight(oh)` (each bin's mean weight) and `effectivesamplesize(oh)` (Kish's `(Σw)²/Σw²`). The weighted
   density equals the count density times the kernel-smoothed mean weight, exactly. `lp_distance` and
   `tv_distance` take `weighted=true`.
+- **`cdf(oh)` and `weightedCdf(oh)`**: the exact integrals of `density(oh)` and `weightedDensity(oh)`.
+  `histogram(oh, bins)` and `weightedHistogram(oh, bins)` now take differences of them instead of integrating
+  numerically. The densities are normalized so their linear interpolation integrates to exactly 1 (before, the
+  grid values summed to 1, which differs slightly when the density is not 0 at the ends of the range).
+- **`m=` and `kernel=` when reading**: `densityGrid`, `density`, `weightedDensity`, `cdf`, `weightedCdf`,
+  `histogram(oh, bins)` and `weightedHistogram(oh, bins)` smooth the same grid with another width or kernel;
+  the constructor's `m` and `kernel` are the defaults.
+- `ashNGrid` must be positive.
 - `MomentAccumulator{T}`: `T = Int` counts points, `T = Float64` sums weights (the same exact merge formulas).
 - **Own ASH.** The density is smoothed from StreamHist's own grid of counts and weight sums when it is read,
   reproducing AverageShiftedHistograms.jl's density (now only a test dependency) to 1e-12. Breaking:
