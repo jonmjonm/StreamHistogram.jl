@@ -1,0 +1,26 @@
+# Tags and releases each version registered in General (registered by commenting `@JuliaRegistrator register` on a
+# commit). Copied from https://github.com/JuliaRegistries/TagBot/blob/master/example.yml, without the SSH deploy key
+# (no workflow needs to run on the new tag), and with the job's own permissions: the repository's default token is
+# read-only, so this job alone is given write access to contents (tags, releases) and issues (TagBot opens one if a
+# release fails).
+name: TagBot
+on:
+  issue_comment:
+    types:
+      - created
+  workflow_dispatch:
+jobs:
+  TagBot:
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      issues: write
+      pull-requests: read
+      statuses: read
+    steps:
+      - uses: JuliaRegistries/TagBot@a761b867f05e7e410011ab16b244f2fffec16c85 # v1.26.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

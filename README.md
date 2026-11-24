@@ -245,3 +245,11 @@ StreamHist(;
 
 Not yet written: merging two independently built `StreamHist`s. The moments,
 the histograms and the grid are all mergeable when the ranges match.
+
+## Releasing
+
+1. Bump `version` in `Project.toml` and add a CHANGELOG entry; merge to `main`.
+2. Comment `@JuliaRegistrator register` on the merge commit (release notes may follow on a `Release notes:` line).
+3. When General merges the registration, TagBot (`.github/workflows/TagBot.yml`) tags the commit `vX.Y.Z` and
+   creates the GitHub release. It can't do either for a commit that changes `.github/workflows/`, so keep workflow
+   changes out of release commits.
