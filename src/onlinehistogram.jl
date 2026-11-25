@@ -246,9 +246,9 @@ skewness(oh::StreamHist) = skewness(oh.moments)
 """
     kurtosis(oh)
 
-The fourth central moment over `variance(oh)^2`; not the excess kurtosis, so
-3 for a normal distribution. Needs the highest order in `momentPowers` to be
-at least 4.
+The excess kurtosis: the fourth central moment over `variance(oh)^2`, minus 3,
+so 0 for a normal distribution (as `StatsBase.kurtosis`). Needs the highest
+order in `momentPowers` to be at least 4.
 """
 kurtosis(oh::StreamHist) = kurtosis(oh.moments)
 
@@ -256,7 +256,9 @@ kurtosis(oh::StreamHist) = kurtosis(oh.moments)
     moment(oh, p)
 
 Order-`p` moment (mean for `p == 1`, population central moment for `p >= 2`).
-`p` must be one of `oh.momentPowers`. `NaN` before any point.
+`p` must be one of `oh.momentPowers`. `NaN` before any point. A method of
+`StatsBase.moment`, which agrees for `p >= 2`; for `p == 1` StatsBase gives the
+first central moment, always 0, where this gives the mean.
 """
 function moment(oh::StreamHist, p::Integer)
     p in oh.momentPowers || throw(ArgumentError("power $p was not requested in momentPowers"))
@@ -290,7 +292,7 @@ weightedVariance(oh::StreamHist) = variance(oh.wmoments)
 weightedStd(oh::StreamHist) = std(oh.wmoments)
 "The weighted skewness: the third weighted central moment over `weightedVariance(oh)^1.5`."
 weightedSkewness(oh::StreamHist) = skewness(oh.wmoments)
-"The weighted kurtosis (not excess): the fourth weighted central moment over `weightedVariance(oh)^2`."
+"The weighted excess kurtosis: the fourth weighted central moment over `weightedVariance(oh)^2`, minus 3."
 weightedKurtosis(oh::StreamHist) = kurtosis(oh.wmoments)
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -712,34 +714,34 @@ weightedDensity(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
     interpolated(densityGrid(oh; weighted=true, m, kernel)...)
 
 """
-    cdf(oh; m=oh.m, kernel=oh.kernel)
+    densityCdf(oh; m=oh.m, kernel=oh.kernel)
 
-A callable `x -> cdf(x)`: the exact integral of `density(oh)` up to `x`, the
+A callable `x -> F(x)`: the exact integral of `density(oh)` up to `x`, the
 estimated fraction of the points in range that are at most `x`. It is 0 below
 the range and 1 from its top up, and `NaN` from the bottom of the range up if
 no point is inside it. Needs what `density` needs; a snapshot like it.
 """
-cdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densityGrid(oh; m, kernel)...)
+densityCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densityGrid(oh; m, kernel)...)
 
 """
-    weightedCdf(oh; m=oh.m, kernel=oh.kernel)
+    weightedDensityCdf(oh; m=oh.m, kernel=oh.kernel)
 
-`cdf(oh)` for the weighted data: the exact integral of `weightedDensity(oh)`
+`densityCdf(oh)` for the weighted data: the exact integral of `weightedDensity(oh)`
 up to `x`, the estimated fraction of the in-range weight at values at most `x`.
 """
-weightedCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
+weightedDensityCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
     cumulative(densityGrid(oh; weighted=true, m, kernel)...)
 
 """
     histogram(oh, bins; m=oh.m, kernel=oh.kernel)
 
 The expected counts over an arbitrary set of edges `bins`: the integral of
-`density(oh)` between consecutive edges (exactly, from `cdf(oh)`), scaled by
+`density(oh)` between consecutive edges (exactly, from `densityCdf(oh)`), scaled by
 the number of points inside the histogram's range, which is what the density
 is normalized over.
 """
 histogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
-    binintegrals(cdf(oh; m, kernel), ninrange(oh), bins)
+    binintegrals(densityCdf(oh; m, kernel), ninrange(oh), bins)
 
 """
     weightedHistogram(oh, bins; m=oh.m, kernel=oh.kernel)
@@ -749,7 +751,7 @@ histogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=
 weight of the points in range, giving the expected weight in each bin.
 """
 weightedHistogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
-    binintegrals(weightedCdf(oh; m, kernel), inrangeweight(oh), bins)
+    binintegrals(weightedDensityCdf(oh; m, kernel), inrangeweight(oh), bins)
 
 # With nothing in range the density is undefined (NaN), and nothing falls in any bin.
 function binintegrals(F, total, bins)

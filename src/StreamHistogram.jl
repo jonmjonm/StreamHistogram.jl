@@ -13,13 +13,15 @@ using StatsBase: Histogram
 using QuadGK
 
 import Statistics: mean, std, quantile
-import StatsBase: nobs
+# Methods of the StatsBase functions of the same names, so that `using StatsBase, StreamHistogram` leaves no
+# name ambiguous. They mean what StatsBase's do: population values, and `kurtosis` is the excess kurtosis.
+import StatsBase: nobs, moment, skewness, kurtosis
 
 export StreamHist, add!, finalize!, isinitialized, MomentAccumulator,
     nobs, datarange, outofrange, exactHistogram, density, densityGrid, histogram, densityQuality,
     moment, moments, mean, variance, std, skewness, kurtosis, lp_distance, tv_distance,
     totalweight, effectivesamplesize, outofrangeweight, weightedHistogram, weightedDensity, meanWeight,
-    cdf, weightedCdf, quantile, weightedQuantile,
+    densityCdf, weightedDensityCdf, quantile, weightedQuantile,
     weightedDensityQuality, weightedMoment, weightedMoments, weightedMean, weightedVariance, weightedStd,
     weightedSkewness, weightedKurtosis
 
