@@ -1,6 +1,7 @@
 # StreamHistogram.jl
 
 [![CI](https://github.com/jonmjonm/StreamHistogram.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/jonmjonm/StreamHistogram.jl/actions/workflows/CI.yml)
+[![codecov](https://codecov.io/gh/jonmjonm/StreamHistogram.jl/graph/badge.svg)](https://codecov.io/gh/jonmjonm/StreamHistogram.jl)
 
 `StreamHistogram` builds a histogram, a smooth density and exact moments from
 data that arrives one point or one batch at a time: a stream, a simulation, a
