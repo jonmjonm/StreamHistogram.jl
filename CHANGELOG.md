@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - **`quantile(oh, p)` and `weightedQuantile(oh, p)`**: estimated quantiles (`p` a number or a vector), from the
   traditional histogram's bins, interpolated linearly within a bin (the bin's integer in integer mode), with the
