@@ -368,5 +368,20 @@ end
 
 include("correctness.jl")
 include("weights.jl")
+@testset "no exported name clashes with StatsBase, Statistics or Base" begin
+    # `using StatsBase, StreamHistogram` must leave every name usable: an exported name of StreamHistogram that
+    # StatsBase, Statistics or Base also exports must be the same function, extended here with methods.
+    import StatsBase
+    for mod in (StatsBase, Statistics, Base), name in names(StreamHistogram)
+        name in names(mod) || continue
+        @test getfield(StreamHistogram, name) === getfield(mod, name)
+    end
+    m = Module()
+    Core.eval(m, :(using StatsBase, StreamHistogram))
+    for name in (:moment, :skewness, :kurtosis, :mean, :std, :quantile, :nobs)
+        @test isdefined(m, name)
+    end
+end
+
 include("cdf.jl")
 include("quantile.jl")

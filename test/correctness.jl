@@ -6,9 +6,7 @@
 # (merge/addpoint/batchaccumulator agreement, API surface, error paths).
 
 import StatsBase
-using StatsBase: fit, Histogram  # StatsBase also exports skewness/kurtosis,
-                                  # which would clash with StreamHistogram's
-                                  # own -- call those as StatsBase.skewness/kurtosis
+using StatsBase: fit, Histogram
 using AverageShiftedHistograms
 using QuadGK: quadgk
 
@@ -24,13 +22,12 @@ using QuadGK: quadgk
     @test variance(oh) ≈ var(data, corrected=false) rtol=1e-8
     @test std(oh) ≈ std(data, corrected=false) rtol=1e-8
     @test skewness(oh) ≈ StatsBase.skewness(data) rtol=1e-4
-    # StatsBase.kurtosis is *excess* kurtosis (kurtosis - 3); ours is raw.
-    @test kurtosis(oh) ≈ StatsBase.kurtosis(data) + 3 rtol=1e-3
+    @test kurtosis(oh) ≈ StatsBase.kurtosis(data) rtol=1e-3   # both the excess kurtosis
 end
 
 @testset "known-distribution moments: Uniform(0,1)" begin
     Random.seed!(12)
-    data = rand(200_000)  # Uniform(0,1): mean=1/2, var=1/12, skew=0, raw kurtosis=9/5
+    data = rand(200_000)  # Uniform(0,1): mean=1/2, var=1/12, skew=0, excess kurtosis=-6/5
 
     oh = StreamHist(binRange=(0.0, 1.0), binNum=100, momentPowers=[1, 2, 3, 4])
     add!(oh, data)
@@ -39,12 +36,12 @@ end
     @test mean(oh) ≈ 0.5 atol=0.01
     @test variance(oh) ≈ 1 / 12 atol=0.001
     @test moment(oh, 3) ≈ 0.0 atol=0.01          # symmetric -> odd central moment ~0
-    @test kurtosis(oh) ≈ 9 / 5 atol=0.05
+    @test kurtosis(oh) ≈ -6 / 5 atol=0.05
 end
 
 @testset "known-distribution moments: standard Normal" begin
     Random.seed!(13)
-    data = randn(200_000)  # mean=0, var=1, skew=0, raw kurtosis=3
+    data = randn(200_000)  # mean=0, var=1, skew=0, excess kurtosis=0
 
     oh = StreamHist(binRange=(-6.0, 6.0), binNum=300)
     add!(oh, data)
@@ -53,7 +50,7 @@ end
     @test mean(oh) ≈ 0.0 atol=0.02
     @test variance(oh) ≈ 1.0 atol=0.02
     @test skewness(oh) ≈ 0.0 atol=0.05
-    @test kurtosis(oh) ≈ 3.0 atol=0.1
+    @test kurtosis(oh) ≈ 0.0 atol=0.1
 end
 
 @testset "exactHistogram matches a directly-built reference Histogram, bin-for-bin" begin

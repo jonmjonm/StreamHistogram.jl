@@ -22,8 +22,8 @@ momentAccumulator.md). `MomentAccumulator(maxpower)` counts points
 (`n::Int`); `MomentAccumulator(Float64, maxpower)` sums weights (`n` is the
 total weight). Fields: `n`, `mean`, and `M[p] = Σ(x - mean)^p` (weighted:
 `Σw(x - mean)^p`) for `p` in `2:maxpower`. A `StreamHist` keeps one of each;
-`nobs`, `mean`, `variance`, `std`, `skewness` and `kurtosis` work on it
-directly, and are `NaN` while `n` is 0.
+`nobs`, `mean`, `variance`, `std`, `skewness` and `kurtosis` (the excess
+kurtosis) work on it directly, and are `NaN` while `n` is 0.
 """
 struct MomentAccumulator{T<:Real}
     n::T
@@ -228,5 +228,5 @@ function skewness(A::MomentAccumulator)
 end
 function kurtosis(A::MomentAccumulator)
     v = variance(A)
-    return centralmoment(A, 4) / v^2
+    return centralmoment(A, 4) / v^2 - 3   # excess kurtosis, as StatsBase.kurtosis: 0 for a normal
 end

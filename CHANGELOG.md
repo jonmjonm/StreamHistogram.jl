@@ -2,6 +2,15 @@
 
 ## 0.2.1
 
+- **`kurtosis` and `weightedKurtosis` are the excess kurtosis** (the fourth central moment over the variance
+  squared, minus 3; 0 for a normal), as `StatsBase.kurtosis`. Before, they did not subtract 3. Breaking.
+- **`cdf` and `weightedCdf` are renamed `densityCdf` and `weightedDensityCdf`**: they are the CDFs of `density`
+  and `weightedDensity`, and the old name clashed with `Distributions.cdf`, which evaluates a distribution's CDF at
+  a point. Breaking.
+- **`moment`, `skewness` and `kurtosis` are methods of the StatsBase functions** of those names, instead of
+  functions of their own, so `using StatsBase, StreamHistogram` no longer leaves those three names undefined.
+  They agree with StatsBase on the same data, except that `moment(oh, 1)` is the mean (StatsBase's first central
+  moment is always 0).
 - **`quantile(oh, p)` and `weightedQuantile(oh, p)`**: estimated quantiles (`p` a number or a vector), from the
   traditional histogram's bins, interpolated linearly within a bin (the bin's integer in integer mode), with the
   exact minimum and maximum at `p = 0` and `1`. A quantile among the out-of-range points is interpolated across

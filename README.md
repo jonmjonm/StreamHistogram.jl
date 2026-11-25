@@ -48,7 +48,7 @@ outofrange(oh)                        # (underflow=, overflow=): points outside 
 exactHistogram(oh)                    # bin counts
 
 f = density(oh)                       # a function: f(x) at any x
-F = cdf(oh)                           # F(b) - F(a) estimates the fraction of points in (a, b]
+F = densityCdf(oh)                    # F(b) - F(a) estimates the fraction of points in (a, b]
 histogram(oh, -3:0.5:3)               # expected counts in any bins
 density(oh; m=20)                     # the same data, smoothed more
 densityQuality(oh)                    # how far the density's moments are from the exact ones
@@ -58,7 +58,7 @@ ow = StreamHist(binRange=(-5.0, 5.0))  # a fixed range: no learn phase
 xs = randn(10_000)
 add!(ow, xs, exp.(xs))                 # weights exp(x): the weighted data is N(1, 1)
 weightedMean(ow), effectivesamplesize(ow)
-weightedDensity(ow), weightedCdf(ow), meanWeight(ow)
+weightedDensity(ow), weightedDensityCdf(ow), meanWeight(ow)
 ```
 
 ## The range: learned or given
@@ -97,7 +97,7 @@ grid that also holds weights. The test suite checks the two agree to 1e-12.
 
 - `density(oh)` returns a function that interpolates linearly between the grid
   points. It is 0 outside the range and integrates to exactly 1 over it.
-- `cdf(oh)` returns its exact integral up to `x`: 0 below the range, 1 from its
+- `densityCdf(oh)` returns its exact integral up to `x`: 0 below the range, 1 from its
   top up.
 - `histogram(oh, bins)` gives expected counts in any bins: the number of
   points in range times the differences of the CDF at the edges.
@@ -112,7 +112,7 @@ without rebuilding. Each of these readers, and their weighted versions, takes
 
 ```julia
 density(oh; m=20)                          # smoother
-cdf(oh; kernel=u -> exp(-u^2 / 2), m=3)    # a gaussian kernel
+densityCdf(oh; kernel=u -> exp(-u^2 / 2), m=3)    # a gaussian kernel
 ```
 
 ## Checking the results
@@ -131,10 +131,16 @@ that do depend on a bin width, a smoothing width and a range:
 `moment(oh, p)` is the mean for `p == 1` and the population central moment
 `Σ(x - mean)^p / n` for `p >= 2`; `p` must be in `momentPowers` (default
 `[1, 2, 4, 8]`). `variance`, `std`, `skewness` and `kurtosis` are population
-values (no `n - 1` correction), and `kurtosis` is not the excess kurtosis: it
-is 3 for a normal distribution. They need the highest tracked order to be at
-least 2, 2, 3 and 4 respectively. Every moment, the mean included, is `NaN`
-before any point is added.
+values (no `n - 1` correction), and `kurtosis` is the excess kurtosis: 0 for a
+normal distribution. They need the highest tracked order to be at least 2, 2,
+3 and 4 respectively. Every moment, the mean included, is `NaN` before any
+point is added.
+
+`moment`, `skewness` and `kurtosis` are methods of the StatsBase functions of
+those names (as `mean`, `std` and `quantile` are of the Statistics ones), so
+`using StatsBase, StreamHistogram` works without clashes, and they agree with
+StatsBase on the same data. The one difference: StatsBase's `moment(x, 1)` is
+the first central moment, always 0, where `moment(oh, 1)` is the mean.
 
 ## Quantiles
 
@@ -162,7 +168,7 @@ unweighted results, because each tally is kept twice:
 |---|---|
 | `nobs(oh)` | `totalweight(oh)` |
 | `exactHistogram(oh)` (count per bin) | `weightedHistogram(oh)` (sum of weights per bin) |
-| `density(oh)`, `cdf(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedCdf(oh)`, `weightedHistogram(oh, bins)` |
+| `density(oh)`, `densityCdf(oh)`, `histogram(oh, bins)` | `weightedDensity(oh)`, `weightedDensityCdf(oh)`, `weightedHistogram(oh, bins)` |
 | `quantile(oh, p)` | `weightedQuantile(oh, p)` |
 | `moment(oh, p)`, `moments`, `mean`, `variance`, `std`, `skewness`, `kurtosis` | `weightedMoment(oh, p)`, `weightedMoments`, `weightedMean`, `weightedVariance`, `weightedStd`, `weightedSkewness`, `weightedKurtosis` |
 | `outofrange(oh)` | `outofrangeweight(oh)` |
@@ -195,7 +201,7 @@ the total weight is 0.
 ## Integer mode
 
 With `integer=true` the data is taken to be integer-valued: there is one bin
-per integer in the range, and no ASH grid. `density`, `cdf`, `densityGrid`,
+per integer in the range, and no ASH grid. `density`, `densityCdf`, `densityGrid`,
 `histogram(oh, bins)`, `densityQuality`, the distances and their weighted
 versions raise `ArgumentError`; use `exactHistogram` and `weightedHistogram`.
 
@@ -251,7 +257,7 @@ StreamHist(;
 | `histogram(oh, bins)`, `weightedHistogram(oh, bins)` | `(edges=, weights=)`: expected counts or weights in any bins, from the density |
 | **Density** (not in integer mode; take `m=` and `kernel=`) | |
 | `density(oh)`, `weightedDensity(oh)` | the density, as a function of `x` |
-| `cdf(oh)`, `weightedCdf(oh)` | its exact integral up to `x`, as a function |
+| `densityCdf(oh)`, `weightedDensityCdf(oh)` | its exact integral up to `x`, as a function |
 | `densityGrid(oh; weighted=false)` | `(grid=, density=)`: the density at the grid points |
 | `densityQuality(oh)`, `weightedDensityQuality(oh)` | relative error of the density's moments, one per tracked order |
 | `lp_distance(a, b; p=2, weighted=false)` | the L^p distance between two densities |
@@ -264,6 +270,25 @@ StreamHist(;
 
 Not yet written: merging two independently built `StreamHist`s. The moments,
 the histograms and the grid are all mergeable when the ranges match.
+
+## Related packages
+
+[OnlineStats.jl](https://github.com/joshday/OnlineStats.jl) covers much of the same ground for unweighted
+streams, among many other online statistics: `Hist`, `KHist` and `ExpandingHist` histograms, `Ash`, `Moments`,
+`Extrema` and `Quantile`. Choose StreamHistogram when the points carry real-valued weights, such as importance
+weights or the weights of an MCMC sample. OnlineStats' `fit!` takes only a whole-number repeat count per
+observation, and its weight objects (`EqualWeight`, `ExponentialWeight`) set how fast older observations are
+forgotten, not how much each one counts. StreamHistogram also offers:
+
+- every statistic both unweighted and weighted from the same pass, with the total weight and the effective
+  sample size;
+- exact central moments of any order (OnlineStats' `Moments` tracks the first four);
+- the moments as a check on the histogram and density, with `densityQuality`, and the count and weight outside
+  the range;
+- a range learned from the first points, then a fixed grid.
+
+Choose OnlineStats for its wider set of statistics, for exponential weighting of a stream that changes over
+time, or to combine several statistics with `Series`.
 
 ## Releasing
 
