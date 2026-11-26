@@ -23,6 +23,8 @@ A `StreamingHistogram` keeps, updated as each point arrives:
 Each of 1, 2, 4 and 5 is kept twice: once counting every point once, and once
 counting every point by its weight.
 
+`StreamHistogram` is particularly well adapted to creating histograms from large amounts of data that can only be touched one. Hence, `StreamHistogram` begins by learning over what range the data seems to vary.
+
 ## Installation
 
 ```julia
@@ -284,7 +286,9 @@ forgotten, not how much each one counts. StreamHistogram also offers:
 - exact central moments of any order (OnlineStats' `Moments` tracks the first four);
 - the moments as a check on the histogram and density, with `densityQuality`, and the count and weight outside
   the range;
-- a range learned from the first points, then a fixed grid.
+- a range learned from the first points, then a fixed grid. 
+
+`StreamHistogram` was developed to build histograms for data in the [Atlas Format](https://duke.is/QGDoc). The features are those needed from that application but may be of use in other settings.
 
 Choose OnlineStats for its wider set of statistics, for exponential weighting of a stream that changes over
 time, or to combine several statistics with `Series`.
