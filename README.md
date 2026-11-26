@@ -27,8 +27,7 @@ counting every point by its weight.
 
 ```julia
 import Pkg
-Pkg.add("StreamHistogram")       # once registered
-Pkg.add(url="https://github.com/jonmjonm/StreamHistogram.jl")   # until then
+Pkg.add("StreamHistogram")      
 ```
 
 Julia 1.10 or later.
