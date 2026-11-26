@@ -138,10 +138,17 @@ normal distribution. They need the highest tracked order to be at least 2, 2,
 point is added.
 
 `moment`, `skewness` and `kurtosis` are methods of the StatsBase functions of
-those names (as `mean`, `std` and `quantile` are of the Statistics ones), so
+those names, so
 `using StatsBase, StreamHistogram` works without clashes, and they agree with
 StatsBase on the same data. The one difference: StatsBase's `moment(x, 1)` is
 the first central moment, always 0, where `moment(oh, 1)` is the mean.
+
+Likewise, `mean`, `std` and `quantile` are methods of the Statistics functions
+of those names, so `using Statistics, StreamHistogram` works without clashes.
+Note that `std(oh)` is the population value, while `Statistics.std` of a vector
+applies the `n - 1` correction by default; compare it with
+`std(x; corrected=false)`. `quantile(oh, p)` is an estimate from the bins (see
+[Quantiles](#quantiles)), so it will not exactly match `quantile(x, p)`.
 
 ## Quantiles
 
