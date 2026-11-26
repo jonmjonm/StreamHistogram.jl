@@ -8,7 +8,7 @@ Random.seed!(1234)
 
 @testset "tv_distance integrates ASH densities over their supports" begin
     function finalized_hist(data, range)
-        oh = StreamHist(learn=false, binRange=range, binNum=40)
+        oh = StreamingHistogram(learn=false, binRange=range, binNum=40)
         add!(oh, data)
         finalize!(oh)
         return oh
@@ -30,7 +30,7 @@ Random.seed!(1234)
     @test lp_distance(left, right; p=2) ≈ expected_l2 atol=1e-8
     @test_throws ArgumentError lp_distance(left, right; p=0)
     @test tv_distance(left, right) ≈ tv_distance(right, left) atol=1e-10
-    @test_throws ArgumentError tv_distance(StreamHist(learn=false, binRange=(0.0, 1.0)), left)
+    @test_throws ArgumentError tv_distance(StreamingHistogram(learn=false, binRange=(0.0, 1.0)), left)
 end
 
 @testset "MomentAccumulator vs naive (Float64 batch)" begin
@@ -115,8 +115,8 @@ end
     end
 end
 
-@testset "StreamHist basic add!/finalize! with binRange given" begin
-    oh = StreamHist(binRange=(-5.0, 5.0), binNum=20)
+@testset "StreamingHistogram basic add!/finalize! with binRange given" begin
+    oh = StreamingHistogram(binRange=(-5.0, 5.0), binNum=20)
     @test isinitialized(oh)  # initialized immediately since binRange given
 
     data = randn(2000)
@@ -148,7 +148,7 @@ end
 
 @testset "single-point add! and batch add! give the same grid and density" begin
     data = randn(3000)
-    a, b = StreamHist(binRange=(-6.0, 6.0), binNum=100), StreamHist(binRange=(-6.0, 6.0), binNum=100)
+    a, b = StreamingHistogram(binRange=(-6.0, 6.0), binNum=100), StreamingHistogram(binRange=(-6.0, 6.0), binNum=100)
     foreach(x -> add!(a, x), data)
     add!(b, data)
     @test a.gridCounts == b.gridCounts && sum(a.gridCounts) == count(x -> -6.0 <= x <= 6.0, data)
@@ -157,7 +157,7 @@ end
 end
 
 @testset "density/histogram/densityQuality need the range fixed (finalize! ends the learn phase)" begin
-    oh = StreamHist(learnLength=10_000, binNum=50)
+    oh = StreamingHistogram(learnLength=10_000, binNum=50)
     add!(oh, randn(1000))
     @test !isinitialized(oh)
     for read in (density, weightedDensity, densityQuality, densityGrid, exactHistogram, weightedHistogram, meanWeight)
@@ -172,7 +172,7 @@ end
 end
 
 @testset "learn phase auto-ranging" begin
-    oh = StreamHist(learn=true, learnLength=1000, binNum=25, paddingPct=0.1)
+    oh = StreamingHistogram(learn=true, learnLength=1000, binNum=25, paddingPct=0.1)
     @test !isinitialized(oh)
 
     data1 = randn(999) .* 2 .+ 3.0
@@ -199,12 +199,12 @@ end
     # Feeding points one at a time (the streaming use) must cross learnLength inside the scalar add!,
     # fix the same range, replay the buffer, and end up identical to feeding the same data as one batch.
     data = [sin(1.7i) * 3 + 0.01i for i in 1:1500]
-    one = StreamHist(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
+    one = StreamingHistogram(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
     for (k, x) in enumerate(data)
         add!(one, x)
         @test isinitialized(one) == (k >= 1000)   # initialized exactly when the buffer fills
     end
-    batch = StreamHist(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
+    batch = StreamingHistogram(learn=true, learnLength=1000, binNum=30, paddingPct=0.1)
     add!(batch, data[1:1000]); add!(batch, data[1001:end])
     finalize!(one); finalize!(batch)
     @test nobs(one) == nobs(batch) == length(data)
@@ -216,12 +216,12 @@ end
     @test density(one)(0.0) ≈ density(batch)(0.0) rtol=1e-10
 
     # integer=:auto is resolved by the scalar path too
-    ints = StreamHist(integer=:auto, learnLength=50)
+    ints = StreamingHistogram(integer=:auto, learnLength=50)
     for i in 1:60
         add!(ints, i % 7)
     end
     @test isinitialized(ints) && ints.integer
-    floats = StreamHist(integer=:auto, learnLength=50)
+    floats = StreamingHistogram(integer=:auto, learnLength=50)
     for i in 1:60
         add!(floats, i / 7)
     end
@@ -230,7 +230,7 @@ end
 
 @testset "no point inside the range: NaN density quality, zero counts, no error" begin
     # e.g. one --bin-range applied to many fields, one of which lies entirely outside it
-    oh = StreamHist(binRange=(100.0, 250.0), binNum=3)
+    oh = StreamingHistogram(binRange=(100.0, 250.0), binNum=3)
     add!(oh, [838.0, 839.5, 840.1])
     finalize!(oh)
     @test outofrange(oh) == (underflow=0, overflow=3)
@@ -242,12 +242,12 @@ end
 end
 
 @testset "learn=false needs a range" begin
-    @test_throws ArgumentError StreamHist(learn=false)
-    @test isinitialized(StreamHist(learn=false, binRange=(0, 1)))
+    @test_throws ArgumentError StreamingHistogram(learn=false)
+    @test isinitialized(StreamingHistogram(learn=false, binRange=(0, 1)))
 end
 
 @testset "finalize! forces early range init" begin
-    oh = StreamHist(learn=true, learnLength=10_000)
+    oh = StreamingHistogram(learn=true, learnLength=10_000)
     add!(oh, randn(50))
     @test !isinitialized(oh)
     finalize!(oh)
@@ -256,7 +256,7 @@ end
 end
 
 @testset "integer mode" begin
-    oh = StreamHist(integer=true, binRange=(1, 10))
+    oh = StreamingHistogram(integer=true, binRange=(1, 10))
     @test isinitialized(oh)
     add!(oh, [1, 1, 2, 10, 10, 10, 5])
     finalize!(oh)
@@ -270,14 +270,14 @@ end
 end
 
 @testset "integer mode rejects conflicting bins/binNum" begin
-    @test_throws ArgumentError StreamHist(integer=true, binRange=(1, 10), bins=[0.5, 5.5, 10.5])
-    @test_throws ArgumentError StreamHist(integer=true, binRange=(1, 10), binNum=99)
+    @test_throws ArgumentError StreamingHistogram(integer=true, binRange=(1, 10), bins=[0.5, 5.5, 10.5])
+    @test_throws ArgumentError StreamingHistogram(integer=true, binRange=(1, 10), binNum=99)
     # binNum at its default is fine (not a conflict)
-    @test StreamHist(integer=true, binRange=(1, 10)) isa StreamHist
+    @test StreamingHistogram(integer=true, binRange=(1, 10)) isa StreamingHistogram
 end
 
 @testset "integer=:auto detects integer-valued learn buffer" begin
-    oh = StreamHist(integer=:auto, learnLength=50)
+    oh = StreamingHistogram(integer=:auto, learnLength=50)
     add!(oh, collect(1:50))
     @test oh.integer
     @test !oh.integerAuto
@@ -290,7 +290,7 @@ end
 end
 
 @testset "integer=:auto detects non-integer learn buffer" begin
-    oh = StreamHist(integer=:auto, learnLength=50)
+    oh = StreamingHistogram(integer=:auto, learnLength=50)
     add!(oh, [collect(1:49); 3.5])
     @test !oh.integer
     @test !oh.integerAuto
@@ -302,7 +302,7 @@ end
 
 @testset "integer=:auto defers the binNum conflict check until resolution" begin
     # No conflict raised yet -- integer isn't decided until the buffer fills.
-    oh = StreamHist(integer=:auto, binNum=99, learnLength=20)
+    oh = StreamingHistogram(integer=:auto, binNum=99, learnLength=20)
     @test oh.integerAuto
 
     # Resolves to non-integer: binNum=99 is actually used, no conflict.
@@ -310,14 +310,14 @@ end
     @test !oh.integer
 
     # Resolves to integer: binNum=99 conflicts, raised at resolution time.
-    oh2 = StreamHist(integer=:auto, binNum=99, learnLength=20)
+    oh2 = StreamingHistogram(integer=:auto, binNum=99, learnLength=20)
     @test_throws ArgumentError add!(oh2, collect(1:20))
 end
 
 @testset "integer=:auto resolves in finalize! when the learn buffer never fills" begin
     # learnLength is never reached via add!, so resolution can only happen in
     # finalize!'s early buffer-flush path.
-    oh = StreamHist(integer=:auto, learnLength=1000)
+    oh = StreamingHistogram(integer=:auto, learnLength=1000)
     add!(oh, collect(1:10))
     @test oh.integerAuto              # not yet resolved
     finalize!(oh)
@@ -325,7 +325,7 @@ end
     @test !oh.integerAuto
     @test eltype(exactHistogram(oh).edges[1]) == Int
 
-    oh2 = StreamHist(integer=:auto, learnLength=1000)
+    oh2 = StreamingHistogram(integer=:auto, learnLength=1000)
     add!(oh2, [collect(1:9); 3.5])
     finalize!(oh2)
     @test !oh2.integer
@@ -333,14 +333,14 @@ end
 end
 
 @testset "integer=:auto requires learn=true and rejects bins/binRange" begin
-    @test_throws ArgumentError StreamHist(integer=:auto, binRange=(1, 10))
-    @test_throws ArgumentError StreamHist(integer=:auto, bins=[0.5, 5.5, 10.5])
-    @test_throws ArgumentError StreamHist(integer=:auto, learn=false)
-    @test_throws ArgumentError StreamHist(integer=:notauto)
+    @test_throws ArgumentError StreamingHistogram(integer=:auto, binRange=(1, 10))
+    @test_throws ArgumentError StreamingHistogram(integer=:auto, bins=[0.5, 5.5, 10.5])
+    @test_throws ArgumentError StreamingHistogram(integer=:auto, learn=false)
+    @test_throws ArgumentError StreamingHistogram(integer=:notauto)
 end
 
 @testset "densityQuality on a Gaussian" begin
-    oh = StreamHist(binRange=(-6.0, 6.0), binNum=200, momentPowers=[1, 2, 4])
+    oh = StreamingHistogram(binRange=(-6.0, 6.0), binNum=200, momentPowers=[1, 2, 4])
     add!(oh, randn(20_000))
     finalize!(oh)
     relerrs = densityQuality(oh)
@@ -349,7 +349,7 @@ end
 end
 
 @testset "histogram(oh, bins) integrates density into custom bins" begin
-    oh = StreamHist(binRange=(-6.0, 6.0), binNum=200)
+    oh = StreamingHistogram(binRange=(-6.0, 6.0), binNum=200)
     add!(oh, randn(20_000))
     finalize!(oh)
     custom = collect(-6.0:1.0:6.0)
@@ -359,7 +359,7 @@ end
 end
 
 @testset "moment()/moments() respect momentPowers restriction" begin
-    oh = StreamHist(binRange=(-5.0, 5.0), momentPowers=[1, 2])
+    oh = StreamingHistogram(binRange=(-5.0, 5.0), momentPowers=[1, 2])
     add!(oh, randn(100))
     @test_throws ArgumentError moment(oh, 4)
     m = moments(oh)
@@ -383,11 +383,11 @@ include("weights.jl")
     end
 end
 
-@testset "nobs of the moment accumulator, and show of a StreamHist" begin
-    oh = StreamHist(binRange=(0.0, 4.0), binNum=4)
+@testset "nobs of the moment accumulator, and show of a StreamingHistogram" begin
+    oh = StreamingHistogram(binRange=(0.0, 4.0), binNum=4)
     add!(oh, [1.0, 2.0, 3.0])
     @test nobs(oh.moments) == 3
-    @test repr(oh) == "StreamHist(n=3, totalweight=3.0, initialized=true, integer=false)"
+    @test repr(oh) == "StreamingHistogram(n=3, totalweight=3.0, initialized=true, integer=false)"
 end
 
 include("cdf.jl")

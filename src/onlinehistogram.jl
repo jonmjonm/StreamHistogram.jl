@@ -6,7 +6,7 @@ biweight(u) = abs(u) <= 1 ? (1.0 - u^2)^2 : 0.0
 
 # Every point carries a weight (1 unless `add!` is given one). Each tally comes in two forms side by side: the
 # unweighted one (counts) and the weighted one (sums of weights). Weights never change the unweighted tallies.
-mutable struct StreamHist
+mutable struct StreamingHistogram
     # config, fixed at construction
     integer::Bool
     # true iff `integer=:auto` was requested and not yet resolved from the learn buffer; `integer` itself is a
@@ -56,10 +56,10 @@ mutable struct StreamHist
 end
 
 """
-    StreamHist(; integer=false, momentPowers=[1,2,4,8], learn=true,
-               learnLength=10_000, paddingPct=0.05, binRange=nothing,
-               binNum=50, bins=nothing, closed=:left,
-               kernel=StreamHistogram.biweight, m=5, ashNGrid=500)
+    StreamingHistogram(; integer=false, momentPowers=[1,2,4,8], learn=true,
+                      learnLength=10_000, paddingPct=0.05, binRange=nothing,
+                      binNum=50, bins=nothing, closed=:left,
+                      kernel=StreamHistogram.biweight, m=5, ashNGrid=500)
 
 An empty online histogram. Points, optionally weighted, are added with `add!`,
 one at a time or in batches. It keeps a traditional histogram
@@ -100,7 +100,7 @@ Integer-valued data:
   point `isinteger`. Needs the learn phase, so not with `bins`, `binRange` or
   `learn=false`.
 """
-function StreamHist(;
+function StreamingHistogram(;
     integer::Union{Bool,Symbol}=false,
     momentPowers::AbstractVector{<:Integer}=DEFAULT_MOMENT_POWERS,
     learn::Bool=true,
@@ -136,7 +136,7 @@ function StreamHist(;
     momentPowers = sort(unique(Int.(momentPowers)))
     maxp = max(1, maximum(momentPowers))
 
-    oh = StreamHist(
+    oh = StreamingHistogram(
         integer, integerAuto, momentPowers, learn, Int(learnLength), Float64(paddingPct),
         Int(binNum), closed, kernel, Int(m), Int(ashNGrid),
         Float64[], Float64[],
@@ -166,7 +166,7 @@ end
 
 The number of points added, in the range or not, whatever their weights.
 """
-StatsBase.nobs(oh::StreamHist) = oh.moments.n
+StatsBase.nobs(oh::StreamingHistogram) = oh.moments.n
 
 """
     datarange(oh)
@@ -175,7 +175,7 @@ StatsBase.nobs(oh::StreamHist) = oh.moments.n
 any point). Not the histogram's range, which is `extrema` of
 `exactHistogram(oh)`'s edges.
 """
-datarange(oh::StreamHist) = (oh.exactMin, oh.exactMax)
+datarange(oh::StreamingHistogram) = (oh.exactMin, oh.exactMax)
 
 """
     isinitialized(oh)
@@ -183,7 +183,7 @@ datarange(oh::StreamHist) = (oh.exactMin, oh.exactMax)
 Whether the range is set: `false` during the learn phase, when the histograms
 and densities can't be read yet.
 """
-isinitialized(oh::StreamHist) = oh.hist !== nothing
+isinitialized(oh::StreamingHistogram) = oh.hist !== nothing
 
 """
     totalweight(oh)
@@ -191,7 +191,7 @@ isinitialized(oh::StreamHist) = oh.hist !== nothing
 The sum of the weights of every point added (`nobs(oh)` when no weights were
 given, since each point then has weight 1).
 """
-totalweight(oh::StreamHist) = oh.wmoments.n
+totalweight(oh::StreamingHistogram) = oh.wmoments.n
 
 """
     effectivesamplesize(oh)
@@ -201,7 +201,7 @@ points that would give the weighted statistics the same precision. Equals
 `nobs(oh)` when every weight is the same; much smaller when a few points
 carry most of the weight. `0.0` while the total weight is 0.
 """
-effectivesamplesize(oh::StreamHist) = oh.sumW2 == 0 ? 0.0 : totalweight(oh)^2 / oh.sumW2
+effectivesamplesize(oh::StreamingHistogram) = oh.sumW2 == 0 ? 0.0 : totalweight(oh)^2 / oh.sumW2
 
 """
     outofrange(oh)
@@ -213,7 +213,7 @@ histogram's range, which are not in `exactHistogram(oh)`'s bins. (With
 holds exactly. A nonzero count means the range, learned or given, misses part
 of the data.
 """
-outofrange(oh::StreamHist) = (underflow=oh.underflowCount, overflow=oh.overflowCount)
+outofrange(oh::StreamingHistogram) = (underflow=oh.underflowCount, overflow=oh.overflowCount)
 
 """
     outofrangeweight(oh)
@@ -222,27 +222,27 @@ outofrange(oh::StreamHist) = (underflow=oh.underflowCount, overflow=oh.overflowC
 `outofrange(oh)`. `sum(weightedHistogram(oh).weights) + underflow + overflow
 == totalweight(oh)` (up to rounding).
 """
-outofrangeweight(oh::StreamHist) = (underflow=oh.underflowWeight, overflow=oh.overflowWeight)
+outofrangeweight(oh::StreamingHistogram) = (underflow=oh.underflowWeight, overflow=oh.overflowWeight)
 
 "Number of points counted inside the histogram's range."
-ninrange(oh::StreamHist) = nobs(oh) - oh.underflowCount - oh.overflowCount
+ninrange(oh::StreamingHistogram) = nobs(oh) - oh.underflowCount - oh.overflowCount
 
 "Sum of the weights of the points inside the histogram's range."
-inrangeweight(oh::StreamHist) = totalweight(oh) - oh.underflowWeight - oh.overflowWeight
+inrangeweight(oh::StreamingHistogram) = totalweight(oh) - oh.underflowWeight - oh.overflowWeight
 
 "The exact mean of every point added; `NaN` before any point."
-Statistics.mean(oh::StreamHist) = mean(oh.moments)
+Statistics.mean(oh::StreamingHistogram) = mean(oh.moments)
 "The exact population variance `Σ(x - mean)² / n` of every point added (no `n - 1` correction); `NaN` before any point."
-variance(oh::StreamHist) = variance(oh.moments)
+variance(oh::StreamingHistogram) = variance(oh.moments)
 "The square root of `variance(oh)`."
-Statistics.std(oh::StreamHist) = std(oh.moments)
+Statistics.std(oh::StreamingHistogram) = std(oh.moments)
 """
     skewness(oh)
 
 The third central moment over `variance(oh)^1.5`. Needs the highest order in
 `momentPowers` to be at least 3.
 """
-skewness(oh::StreamHist) = skewness(oh.moments)
+skewness(oh::StreamingHistogram) = skewness(oh.moments)
 """
     kurtosis(oh)
 
@@ -250,7 +250,7 @@ The excess kurtosis: the fourth central moment over `variance(oh)^2`, minus 3,
 so 0 for a normal distribution (as `StatsBase.kurtosis`). Needs the highest
 order in `momentPowers` to be at least 4.
 """
-kurtosis(oh::StreamHist) = kurtosis(oh.moments)
+kurtosis(oh::StreamingHistogram) = kurtosis(oh.moments)
 
 """
     moment(oh, p)
@@ -260,13 +260,13 @@ Order-`p` moment (mean for `p == 1`, population central moment for `p >= 2`).
 `StatsBase.moment`, which agrees for `p >= 2`; for `p == 1` StatsBase gives the
 first central moment, always 0, where this gives the mean.
 """
-function moment(oh::StreamHist, p::Integer)
+function moment(oh::StreamingHistogram, p::Integer)
     p in oh.momentPowers || throw(ArgumentError("power $p was not requested in momentPowers"))
     return centralmoment(oh.moments, p)
 end
 
 "`Dict{Int,Float64}`: each order in `momentPowers` => `moment(oh, p)`."
-moments(oh::StreamHist) = Dict(p => centralmoment(oh.moments, p) for p in oh.momentPowers)
+moments(oh::StreamingHistogram) = Dict(p => centralmoment(oh.moments, p) for p in oh.momentPowers)
 
 """
     weightedMoment(oh, p)
@@ -276,24 +276,24 @@ The order-`p` moment of the weighted data: the weighted mean `Σwx / Σw` for
 `p` must be one of `oh.momentPowers`. With no weights given (all weights 1)
 this is `moment(oh, p)`. `NaN` while the total weight is 0.
 """
-function weightedMoment(oh::StreamHist, p::Integer)
+function weightedMoment(oh::StreamingHistogram, p::Integer)
     p in oh.momentPowers || throw(ArgumentError("power $p was not requested in momentPowers"))
     return centralmoment(oh.wmoments, p)
 end
 
 "`Dict` of every requested power => its weighted moment (see `weightedMoment`)."
-weightedMoments(oh::StreamHist) = Dict(p => centralmoment(oh.wmoments, p) for p in oh.momentPowers)
+weightedMoments(oh::StreamingHistogram) = Dict(p => centralmoment(oh.wmoments, p) for p in oh.momentPowers)
 
 "The weighted mean `Σwx / Σw`; `NaN` while the total weight is 0."
-weightedMean(oh::StreamHist) = mean(oh.wmoments)
+weightedMean(oh::StreamingHistogram) = mean(oh.wmoments)
 "The weighted population variance `Σw(x - mean)² / Σw`; `NaN` while the total weight is 0."
-weightedVariance(oh::StreamHist) = variance(oh.wmoments)
+weightedVariance(oh::StreamingHistogram) = variance(oh.wmoments)
 "The square root of `weightedVariance(oh)`."
-weightedStd(oh::StreamHist) = std(oh.wmoments)
+weightedStd(oh::StreamingHistogram) = std(oh.wmoments)
 "The weighted skewness: the third weighted central moment over `weightedVariance(oh)^1.5`."
-weightedSkewness(oh::StreamHist) = skewness(oh.wmoments)
+weightedSkewness(oh::StreamingHistogram) = skewness(oh.wmoments)
 "The weighted excess kurtosis: the fourth weighted central moment over `weightedVariance(oh)^2`, minus 3."
-weightedKurtosis(oh::StreamHist) = kurtosis(oh.wmoments)
+weightedKurtosis(oh::StreamingHistogram) = kurtosis(oh.wmoments)
 
 # ---------------------------------------------------------------------------------------------------------------
 # The range: learned or given
@@ -320,7 +320,7 @@ the same `binNum` conflict check that `integer=true` gets at construction,
 just deferred until the decision is actually made. No-op once resolved (or
 if `:auto` was never requested).
 """
-function resolveintegerauto!(oh::StreamHist)
+function resolveintegerauto!(oh::StreamingHistogram)
     oh.integerAuto || return oh
     oh.integerAuto = false
     oh.integer = all(isinteger, oh.learnBuffer)
@@ -332,7 +332,8 @@ function resolveintegerauto!(oh::StreamHist)
     return oh
 end
 
-function initializerange!(oh::StreamHist, range::Tuple{Float64,Float64}; bins::Union{Nothing,Vector{Float64}}=nothing)
+function initializerange!(oh::StreamingHistogram, range::Tuple{Float64,Float64};
+                          bins::Union{Nothing,Vector{Float64}}=nothing)
     lo, hi = range
     if oh.integer
         edges = integeredges(lo, hi)
@@ -357,13 +358,13 @@ function paddedrange(mn::Real, mx::Real, pct::Real)
     return (mn - pad, mx + pad)
 end
 
-function learnedrange(oh::StreamHist)
+function learnedrange(oh::StreamingHistogram)
     mn, mx = extrema(oh.learnBuffer)
     return oh.integer ? (mn, mx) : paddedrange(mn, mx, oh.paddingPct)
 end
 
 "End the learn phase: fix the range from the buffer and feed the buffered points (and weights) in."
-function endlearning!(oh::StreamHist)
+function endlearning!(oh::StreamingHistogram)
     resolveintegerauto!(oh)
     initializerange!(oh, learnedrange(oh))
     feed!(oh, oh.learnBuffer, oh.learnWeights)
@@ -380,9 +381,9 @@ points have arrived), fixing the range from whatever is in the buffer, so
 that the histograms and densities can be read. A no-op once the range is
 fixed; points can still be added afterwards.
 """
-function finalize!(oh::StreamHist)
+function finalize!(oh::StreamingHistogram)
     if !isinitialized(oh)
-        isempty(oh.learnBuffer) && throw(ArgumentError("cannot finalize an empty StreamHist"))
+        isempty(oh.learnBuffer) && throw(ArgumentError("cannot finalize an empty StreamingHistogram"))
         endlearning!(oh)
     end
     return oh
@@ -411,7 +412,7 @@ Weights never change the unweighted results (`exactHistogram`, `density`,
 ...). A point of weight 0 still counts in `nobs`, the min/max and the
 unweighted results.
 """
-function add!(oh::StreamHist, x::Real, w::Real=1)
+function add!(oh::StreamingHistogram, x::Real, w::Real=1)
     x = Float64(x)
     w = checkweight(w)
 
@@ -431,7 +432,7 @@ function add!(oh::StreamHist, x::Real, w::Real=1)
     return oh
 end
 
-function add!(oh::StreamHist, xs, ws::Union{Nothing,AbstractVector{<:Real}}=nothing)
+function add!(oh::StreamingHistogram, xs, ws::Union{Nothing,AbstractVector{<:Real}}=nothing)
     isempty(xs) && return oh
     fxs = tofloatvec(xs)
     fws = ws === nothing ? ones(Float64, length(fxs)) : checkweights(ws, length(fxs))
@@ -471,15 +472,15 @@ tofloatvec(xs::Vector{Float64}) = xs
 tofloatvec(xs) = collect(Float64, xs)
 
 # The histograms and grid are passed as arguments (a function barrier), so the loop runs on their concrete types.
-feed!(oh::StreamHist, xs::Vector{Float64}, ws::Vector{Float64}) = feed!(oh, oh.hist, oh.whist, oh.grid, xs, ws)
-function feed!(oh::StreamHist, h, wh, grid, xs::Vector{Float64}, ws::Vector{Float64})
+feed!(oh::StreamingHistogram, xs::Vector{Float64}, ws::Vector{Float64}) = feed!(oh, oh.hist, oh.whist, oh.grid, xs, ws)
+function feed!(oh::StreamingHistogram, h, wh, grid, xs::Vector{Float64}, ws::Vector{Float64})
     for i in eachindex(xs, ws)
         tally!(oh, h, wh, grid, xs[i], ws[i])
     end
     return oh
 end
 
-tally!(oh::StreamHist, x::Float64, w::Float64) = tally!(oh, oh.hist, oh.whist, oh.grid, x, w)
+tally!(oh::StreamingHistogram, x::Float64, w::Float64) = tally!(oh, oh.hist, oh.whist, oh.grid, x, w)
 
 """
     tally!(oh, x, w)
@@ -491,7 +492,7 @@ underflow or overflow count and weight instead, and not on the grid
 exactly the points the histogram does, and the density describes the same
 points that `histogram(oh, bins)` scales it by.
 """
-function tally!(oh::StreamHist, h::Histogram, wh::Histogram, grid, x::Float64, w::Float64)
+function tally!(oh::StreamingHistogram, h::Histogram, wh::Histogram, grid, x::Float64, w::Float64)
     idx = StatsBase.binindex(h, x)
     if idx < 1
         oh.underflowCount += 1
@@ -515,13 +516,13 @@ end
 # ---------------------------------------------------------------------------------------------------------------
 # Reading the histograms and densities
 
-function requireinitialized(oh::StreamHist)
+function requireinitialized(oh::StreamingHistogram)
     isinitialized(oh) || throw(ArgumentError(
-        "StreamHist range not yet initialized (still learning); call finalize!(oh) first"))
+        "StreamingHistogram range not yet initialized (still learning); call finalize!(oh) first"))
     return oh
 end
 
-function requiredensity(oh::StreamHist)
+function requiredensity(oh::StreamingHistogram)
     oh.integer && throw(ArgumentError("there is no ASH density in integer mode"))
     return requireinitialized(oh)
 end
@@ -533,7 +534,7 @@ The traditional histogram: a `StatsBase.Histogram` of the bin counts. Needs
 the range set (see `finalize!`). Points outside the range are in
 `outofrange(oh)`, not in the edge bins.
 """
-exactHistogram(oh::StreamHist) = requireinitialized(oh).hist
+exactHistogram(oh::StreamingHistogram) = requireinitialized(oh).hist
 
 """
     weightedHistogram(oh)
@@ -542,7 +543,7 @@ A `StatsBase.Histogram` with `exactHistogram(oh)`'s edges whose weights are
 each bin's sum of point weights (equal to the counts when no weights were
 given).
 """
-weightedHistogram(oh::StreamHist) = requireinitialized(oh).whist
+weightedHistogram(oh::StreamingHistogram) = requireinitialized(oh).whist
 
 """
     meanWeight(oh)
@@ -553,7 +554,7 @@ How the weights depend on the value: flat when they don't, so the weighted
 and unweighted histograms then agree in shape. `weightedHistogram(oh)`'s
 weights are `exactHistogram(oh)`'s counts times these.
 """
-function meanWeight(oh::StreamHist)
+function meanWeight(oh::StreamingHistogram)
     h, wh = exactHistogram(oh), weightedHistogram(oh)
     mw = [c == 0 ? NaN : w / c for (c, w) in zip(h.weights, wh.weights)]
     return (edges=collect(only(h.edges)), meanweight=mw)
@@ -575,9 +576,9 @@ bottom edge or from the top edge to the exact maximum: far coarser than a bin,
 so an estimate outside the histogram's edges deserves less trust. `NaN` before
 any point. Needs the range set (see `finalize!`).
 """
-Statistics.quantile(oh::StreamHist, p::Real) =
+Statistics.quantile(oh::StreamingHistogram, p::Real) =
     binquantile(oh, p, nobs(oh), outofrange(oh), exactHistogram(oh).weights)
-Statistics.quantile(oh::StreamHist, p::AbstractVector{<:Real}) = [quantile(oh, x) for x in p]
+Statistics.quantile(oh::StreamingHistogram, p::AbstractVector{<:Real}) = [quantile(oh, x) for x in p]
 
 """
     weightedQuantile(oh, p)
@@ -587,12 +588,12 @@ of the total weight lies, from `weightedHistogram(oh)` and
 `outofrangeweight(oh)`. `p = 0` and `p = 1` give the exact minimum and maximum
 of every point, including any of weight 0. `NaN` while the total weight is 0.
 """
-weightedQuantile(oh::StreamHist, p::Real) =
+weightedQuantile(oh::StreamingHistogram, p::Real) =
     binquantile(oh, p, totalweight(oh), outofrangeweight(oh), weightedHistogram(oh).weights)
-weightedQuantile(oh::StreamHist, p::AbstractVector{<:Real}) = [weightedQuantile(oh, x) for x in p]
+weightedQuantile(oh::StreamingHistogram, p::AbstractVector{<:Real}) = [weightedQuantile(oh, x) for x in p]
 
 # The p-quantile of `total` (a count or a weight): `outside` below and above the range, `inbins` in the bins.
-function binquantile(oh::StreamHist, p::Real, total, outside, inbins)
+function binquantile(oh::StreamingHistogram, p::Real, total, outside, inbins)
     0 <= p <= 1 || throw(ArgumentError("the quantile's probability must be in [0, 1], got $p"))
     total == 0 && return NaN
     mn, mx = datarange(oh)
@@ -614,7 +615,7 @@ function binquantile(oh::StreamHist, p::Real, total, outside, inbins)
 end
 
 # An estimate among the out-of-range points: an integer in integer mode.
-snap(oh::StreamHist, x::Float64) = oh.integer ? round(x) : x
+snap(oh::StreamingHistogram, x::Float64) = oh.integer ? round(x) : x
 
 """
     smoothgrid(cellsums, grid, kernel, m)
@@ -683,7 +684,7 @@ data if `weighted`), the values `density(oh)` / `weightedDensity(oh)`
 interpolate between. `m` and `kernel` smooth with another width or kernel
 than the ones `oh` was built with, without changing `oh`.
 """
-function densityGrid(oh::StreamHist; weighted::Bool=false, m::Integer=oh.m, kernel=oh.kernel)
+function densityGrid(oh::StreamingHistogram; weighted::Bool=false, m::Integer=oh.m, kernel=oh.kernel)
     requiredensity(oh)
     cells = weighted ? oh.gridWeights : oh.gridCounts
     return (grid=oh.grid, density=smoothgrid(cells, oh.grid, kernel, m))
@@ -699,7 +700,7 @@ it integrates to 1. Unavailable when `integer=true`; needs the range fixed
 are in the next `density(oh)`. Every value inside the range is `NaN` if no
 point is inside it. `m` and `kernel`: see `densityGrid`.
 """
-density(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = interpolated(densityGrid(oh; m, kernel)...)
+density(oh::StreamingHistogram; m::Integer=oh.m, kernel=oh.kernel) = interpolated(densityGrid(oh; m, kernel)...)
 
 """
     weightedDensity(oh; m=oh.m, kernel=oh.kernel)
@@ -710,7 +711,7 @@ with its weight. With the same grid, kernel and smoothing width as
 weight `E[w | x]`, and equals `density(oh)` when no weights were given. Every
 value inside the range is `NaN` if the points in range have total weight 0.
 """
-weightedDensity(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
+weightedDensity(oh::StreamingHistogram; m::Integer=oh.m, kernel=oh.kernel) =
     interpolated(densityGrid(oh; weighted=true, m, kernel)...)
 
 """
@@ -721,7 +722,7 @@ estimated fraction of the points in range that are at most `x`. It is 0 below
 the range and 1 from its top up, and `NaN` from the bottom of the range up if
 no point is inside it. Needs what `density` needs; a snapshot like it.
 """
-densityCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densityGrid(oh; m, kernel)...)
+densityCdf(oh::StreamingHistogram; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densityGrid(oh; m, kernel)...)
 
 """
     weightedDensityCdf(oh; m=oh.m, kernel=oh.kernel)
@@ -729,7 +730,7 @@ densityCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) = cumulative(densi
 `densityCdf(oh)` for the weighted data: the exact integral of `weightedDensity(oh)`
 up to `x`, the estimated fraction of the in-range weight at values at most `x`.
 """
-weightedDensityCdf(oh::StreamHist; m::Integer=oh.m, kernel=oh.kernel) =
+weightedDensityCdf(oh::StreamingHistogram; m::Integer=oh.m, kernel=oh.kernel) =
     cumulative(densityGrid(oh; weighted=true, m, kernel)...)
 
 """
@@ -740,7 +741,7 @@ The expected counts over an arbitrary set of edges `bins`: the integral of
 the number of points inside the histogram's range, which is what the density
 is normalized over.
 """
-histogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
+histogram(oh::StreamingHistogram, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
     binintegrals(densityCdf(oh; m, kernel), ninrange(oh), bins)
 
 """
@@ -750,7 +751,7 @@ histogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=
 `weightedDensity(oh)` between consecutive `bins` edges, scaled by the total
 weight of the points in range, giving the expected weight in each bin.
 """
-weightedHistogram(oh::StreamHist, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
+weightedHistogram(oh::StreamingHistogram, bins::AbstractVector{<:Real}; m::Integer=oh.m, kernel=oh.kernel) =
     binintegrals(weightedDensityCdf(oh; m, kernel), inrangeweight(oh), bins)
 
 # With nothing in range the density is undefined (NaN), and nothing falls in any bin.
@@ -770,7 +771,7 @@ relative error `abs(fromdensity - exact) / (abs(exact) + eps())` between the
 two estimates, one entry per power. If no point fell inside the histogram's
 range (all under/overflow), the density is undefined and every entry is `NaN`.
 """
-densityQuality(oh::StreamHist) = densityquality(oh, density(oh), ninrange(oh), mean(oh), p -> moment(oh, p))
+densityQuality(oh::StreamingHistogram) = densityquality(oh, density(oh), ninrange(oh), mean(oh), p -> moment(oh, p))
 
 """
     weightedDensityQuality(oh)
@@ -778,10 +779,10 @@ densityQuality(oh::StreamHist) = densityquality(oh, density(oh), ninrange(oh), m
 `densityQuality` for the weighted data: compares `weightedDensity(oh)`'s
 moments with the exact weighted moments (`weightedMoment`).
 """
-weightedDensityQuality(oh::StreamHist) =
+weightedDensityQuality(oh::StreamingHistogram) =
     densityquality(oh, weightedDensity(oh), inrangeweight(oh), weightedMean(oh), p -> weightedMoment(oh, p))
 
-function densityquality(oh::StreamHist, d, inrange, μ, exactmoment)
+function densityquality(oh::StreamingHistogram, d, inrange, μ, exactmoment)
     inrange == 0 && return fill(NaN, length(oh.momentPowers))
     lo, hi = first(oh.grid), last(oh.grid)
     return map(oh.momentPowers) do p
@@ -795,7 +796,7 @@ end
 # Distances between densities
 
 """
-    lp_distance(a::StreamHist, b::StreamHist; p=2, weighted=false, rtol=sqrt(eps(Float64)), atol=0.0)
+    lp_distance(a::StreamingHistogram, b::StreamingHistogram; p=2, weighted=false, rtol=sqrt(eps(Float64)), atol=0.0)
 
 Return the finite-``p`` L^p distance between the ASH densities of `a` and `b`
 (their weighted densities if `weighted`):
@@ -813,7 +814,7 @@ empty. Both histograms must be non-integer, with their ranges fixed and some
 point (weight, if `weighted`) in range. `rtol` and `atol` are passed to
 `QuadGK.quadgk`.
 """
-function lp_distance(a::StreamHist, b::StreamHist;
+function lp_distance(a::StreamingHistogram, b::StreamingHistogram;
     p::Real=2, weighted::Bool=false, rtol::Real=sqrt(eps(Float64)), atol::Real=0.0)
     isfinite(p) && p > 0 || throw(ArgumentError("p must be finite and positive"))
     rtol >= 0 || throw(ArgumentError("rtol must be nonnegative"))
@@ -821,7 +822,7 @@ function lp_distance(a::StreamHist, b::StreamHist;
     for (which, oh) in (("first", a), ("second", b))
         requiredensity(oh)
         (weighted ? inrangeweight(oh) : ninrange(oh)) > 0 ||
-            throw(ArgumentError("lp_distance: the $which StreamHist has nothing in its range"))
+            throw(ArgumentError("lp_distance: the $which StreamingHistogram has nothing in its range"))
     end
 
     fa, fb = weighted ? (weightedDensity(a), weightedDensity(b)) : (density(a), density(b))
@@ -845,9 +846,9 @@ end
 Return the total-variation distance between two ASH density estimates, equal
 to one half of `lp_distance(a, b; p=1, kwargs...)`.
 """
-tv_distance(a::StreamHist, b::StreamHist; kwargs...) = lp_distance(a, b; p=1, kwargs...) / 2
+tv_distance(a::StreamingHistogram, b::StreamingHistogram; kwargs...) = lp_distance(a, b; p=1, kwargs...) / 2
 
-function Base.show(io::IO, oh::StreamHist)
-    print(io, "StreamHist(n=", nobs(oh), ", totalweight=", totalweight(oh), ", initialized=", isinitialized(oh),
+function Base.show(io::IO, oh::StreamingHistogram)
+    print(io, "StreamingHistogram(n=", nobs(oh), ", totalweight=", totalweight(oh), ", initialized=", isinitialized(oh),
         ", integer=", oh.integer, ")")
 end

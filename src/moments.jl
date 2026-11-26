@@ -21,7 +21,7 @@ An empty accumulator of the mean and the central moments up to order
 momentAccumulator.md). `MomentAccumulator(maxpower)` counts points
 (`n::Int`); `MomentAccumulator(Float64, maxpower)` sums weights (`n` is the
 total weight). Fields: `n`, `mean`, and `M[p] = Σ(x - mean)^p` (weighted:
-`Σw(x - mean)^p`) for `p` in `2:maxpower`. A `StreamHist` keeps one of each;
+`Σw(x - mean)^p`) for `p` in `2:maxpower`. A `StreamingHistogram` keeps one of each;
 `nobs`, `mean`, `variance`, `std`, `skewness` and `kurtosis` (the excess
 kurtosis) work on it directly, and are `NaN` while `n` is 0.
 """

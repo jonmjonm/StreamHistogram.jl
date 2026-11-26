@@ -150,4 +150,4 @@ accumulators is the same merge with $n_A, n_B$ the two weight totals, and adding
 one point $x$ of weight $w$ is the merge with a one-point accumulator of total
 weight $w$ (all of whose central moments are zero). The moments reported are
 $M_p / W$, the population moments of the weighted data. A `MomentAccumulator{Int}`
-is the unweighted case, every weight 1; a `StreamHist` keeps one of each.
+is the unweighted case, every weight 1; a `StreamingHistogram` keeps one of each.
