@@ -10,7 +10,7 @@ weights, and every statistic is then available both unweighted and weighted.
 The moments are exact, so they can be used to check how well the binned and
 smoothed views represent the data.
 
-A `StreamHist` keeps, updated as each point arrives:
+A `StreamingHistogram` keeps, updated as each point arrives:
 
 1. a traditional histogram (a `StatsBase.Histogram`);
 2. an average shifted histogram (ASH) grid, from which a continuous density,
@@ -38,7 +38,7 @@ Julia 1.10 or later.
 ```julia
 using StreamHistogram
 
-oh = StreamHist()                     # the range is learned from the first 10,000 points
+oh = StreamingHistogram()                     # the range is learned from the first 10,000 points
 for _ in 1:100
     add!(oh, randn(1_000))            # a batch; add!(oh, x) adds one point
 end
@@ -54,7 +54,7 @@ density(oh; m=20)                     # the same data, smoothed more
 densityQuality(oh)                    # how far the density's moments are from the exact ones
 
 # weighted points
-ow = StreamHist(binRange=(-5.0, 5.0))  # a fixed range: no learn phase
+ow = StreamingHistogram(binRange=(-5.0, 5.0))  # a fixed range: no learn phase
 xs = randn(10_000)
 add!(ow, xs, exp.(xs))                 # weights exp(x): the weighted data is N(1, 1)
 weightedMean(ow), effectivesamplesize(ow)
@@ -65,7 +65,7 @@ weightedDensity(ow), weightedDensityCdf(ow), meanWeight(ow)
 
 The histogram and the ASH grid need a fixed range. You can give one with
 `binRange = (lo, hi)` or with explicit edges `bins`, and every point is then
-counted from the start. Otherwise `StreamHist` learns it. It buffers the first
+counted from the start. Otherwise `StreamingHistogram` learns it. It buffers the first
 `learnLength` points (default 10,000), then sets the range to their minimum
 and maximum, widened by `paddingPct` (default 5%) of the span on each side, and
 counts the buffered points. Exact moments, the minimum and maximum are tracked
@@ -108,7 +108,7 @@ Each returns a snapshot: points added later are included in the next call.
 
 Because the grid itself is kept, the smoothing can be changed when reading,
 without rebuilding. Each of these readers, and their weighted versions, takes
-`m=` and `kernel=`, defaulting to the ones the `StreamHist` was built with:
+`m=` and `kernel=`, defaulting to the ones the `StreamingHistogram` was built with:
 
 ```julia
 density(oh; m=20)                          # smoother
@@ -217,7 +217,7 @@ phase, so it can't be combined with `bins`, `binRange` or `learn=false`. The
 ## Construction options
 
 ```julia
-StreamHist(;
+StreamingHistogram(;
     integer      = false,           # true, false or :auto; integer-valued data has no density
     momentPowers = [1, 2, 4, 8],    # the moment orders moment(oh, p) reports
     learn        = true,            # learn the range from the first points
@@ -241,7 +241,7 @@ StreamHist(;
 | | |
 |---|---|
 | **Building** | |
-| `StreamHist(; ...)` | a new, empty histogram; see [Construction options](#construction-options) |
+| `StreamingHistogram(; ...)` | a new, empty histogram; see [Construction options](#construction-options) |
 | `add!(oh, x[, w])`, `add!(oh, xs[, ws])` | add a point or a vector of points, optionally weighted |
 | `finalize!(oh)` | end the learn phase now; a no-op once the range is set |
 | `isinitialized(oh)` | whether the range is set |
@@ -268,7 +268,7 @@ StreamHist(;
 | `weightedMoment`, `weightedMoments`, `weightedMean`, ... | the same for the weighted data |
 | `MomentAccumulator` | the mergeable moment accumulator itself; see [momentAccumulator.md](momentAccumulator.md) |
 
-Not yet written: merging two independently built `StreamHist`s. The moments,
+Not yet written: merging two independently built `StreamingHistogram`s. The moments,
 the histograms and the grid are all mergeable when the ranges match.
 
 ## Related packages

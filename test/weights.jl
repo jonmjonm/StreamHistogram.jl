@@ -3,7 +3,7 @@ using QuadGK
 
 "A finalized histogram of `xs` (with weights `ws`, if given) on a fixed range."
 function whist(xs, ws=nothing; kw...)
-    oh = StreamHist(; learn=false, binRange=(-5.0, 5.0), binNum=40, kw...)
+    oh = StreamingHistogram(; learn=false, binRange=(-5.0, 5.0), binNum=40, kw...)
     ws === nothing ? add!(oh, xs) : add!(oh, xs, ws)
     return finalize!(oh)
 end
@@ -43,7 +43,7 @@ end
     # the same through the learn phase (weights >= 1, so both buffers have the same extrema)
     ks = rand(1:3, 2000)
     rep = reduce(vcat, [fill(x, k) for (x, k) in zip(xs, ks)])
-    a, b = StreamHist(learnLength=500), StreamHist(learnLength=500)
+    a, b = StreamingHistogram(learnLength=500), StreamingHistogram(learnLength=500)
     add!(a, xs[1:300], ks[1:300])                           # still learning
     @test !isinitialized(a)
     add!(a, xs[301:end], ks[301:end])
@@ -51,7 +51,7 @@ end
     @test exactHistogram(a).edges == finalize!(b).hist.edges
     finalize!(a)
     @test totalweight(a) == sum(ks)
-    c = StreamHist(learn=false, bins=collect(only(exactHistogram(a).edges)))   # a's learned bins, fixed
+    c = StreamingHistogram(learn=false, bins=collect(only(exactHistogram(a).edges)))   # a's learned bins, fixed
     add!(c, rep)
     finalize!(c)
     @test weightedHistogram(a).weights == exactHistogram(c).weights
@@ -76,7 +76,7 @@ end
 @testset "weights: one point at a time equals one batch, and the moments match the direct formulas" begin
     xs, ws = randn(1500) .* 2 .+ 10, rand(1500) .^ 3          # skewed weights
     a = whist(xs, ws)
-    b = StreamHist(learn=false, binRange=(-5.0, 5.0), binNum=40)
+    b = StreamingHistogram(learn=false, binRange=(-5.0, 5.0), binNum=40)
     for (x, w) in zip(xs, ws)
         add!(b, x, w)
     end
@@ -130,7 +130,7 @@ end
 end
 
 @testset "weights: out of range, integer mode, zero total weight" begin
-    oh = StreamHist(binRange=(0.0, 1.0), binNum=4)
+    oh = StreamingHistogram(binRange=(0.0, 1.0), binNum=4)
     add!(oh, [-1.0, 0.5, 0.6, 2.0, 3.0], [2.0, 1.0, 0.5, 4.0, 0.25])
     finalize!(oh)
     @test outofrange(oh) == (underflow=1, overflow=2)
@@ -139,7 +139,7 @@ end
     @test sum(weightedHistogram(oh, [0.0, 0.5, 1.0]).weights) ≈ 1.5 rtol=1e-6   # the in-range weight
     @test sum(histogram(oh, [0.0, 0.5, 1.0]).weights) ≈ 2 rtol=1e-6            # the points in range
 
-    ints = StreamHist(integer=true, binRange=(1, 4))
+    ints = StreamingHistogram(integer=true, binRange=(1, 4))
     add!(ints, [1, 2, 2, 3, 4, 4], [0.5, 1.0, 1.0, 2.0, 0.25, 0.25])
     finalize!(ints)
     @test weightedHistogram(ints).weights == [0.5, 2.0, 2.0, 0.5]
@@ -147,7 +147,7 @@ end
     @test meanWeight(ints).meanweight == [0.5, 1.0, 2.0, 0.25]
     @test_throws ArgumentError weightedDensity(ints)
 
-    z = StreamHist(binRange=(0.0, 1.0), binNum=4)
+    z = StreamingHistogram(binRange=(0.0, 1.0), binNum=4)
     add!(z, [0.2, 0.7], [0.0, 0.0])
     finalize!(z)
     @test totalweight(z) == 0 && nobs(z) == 2 && effectivesamplesize(z) == 0
@@ -158,7 +158,7 @@ end
 end
 
 @testset "weights: bad weights are refused before anything is added" begin
-    oh = StreamHist(binRange=(0.0, 1.0))
+    oh = StreamingHistogram(binRange=(0.0, 1.0))
     add!(oh, 0.5, 2.0)
     for bad in (-1.0, NaN, Inf)
         @test_throws ArgumentError add!(oh, 0.3, bad)
@@ -198,7 +198,7 @@ end
 @testset "weights: weights never change the unweighted results" begin
     xs, ws = randn(2500), rand(2500) .* 5
     for kw in ((learn=false, binRange=(-5.0, 5.0)), (learnLength=1000,), (learnLength=10_000,))
-        a, b = StreamHist(; kw...), StreamHist(; kw...)
+        a, b = StreamingHistogram(; kw...), StreamingHistogram(; kw...)
         add!(a, xs[1:600], ws[1:600])                       # mixed batch and scalar adds
         for i in 601:900
             add!(a, xs[i], ws[i])
@@ -213,7 +213,7 @@ end
         @test nobs(a) == nobs(b) && datarange(a) == datarange(b) && outofrange(a) == outofrange(b)
         @test totalweight(a) ≈ sum(ws) && effectivesamplesize(a) ≈ sum(ws)^2 / sum(abs2, ws)
         # and the weighted results are the same however the points arrived
-        c = StreamHist(; kw...)                              # all in one batch
+        c = StreamingHistogram(; kw...)                              # all in one batch
         add!(c, xs, ws)
         finalize!(c)
         @test weightedHistogram(a).weights ≈ weightedHistogram(c).weights
@@ -222,11 +222,11 @@ end
 end
 
 @testset "weights: integer=:auto decides from the values, not the weights" begin
-    a = StreamHist(integer=:auto, learnLength=50)
+    a = StreamingHistogram(integer=:auto, learnLength=50)
     add!(a, collect(1:60), fill(0.5, 60))
     @test isinitialized(a) && a.integer
     @test weightedHistogram(finalize!(a)).weights == 0.5 .* exactHistogram(a).weights
-    b = StreamHist(integer=:auto, learnLength=50)
+    b = StreamingHistogram(integer=:auto, learnLength=50)
     add!(b, collect(1:60) ./ 7, fill(2, 60))
     @test isinitialized(b) && !b.integer
 end
@@ -243,6 +243,6 @@ end
     z = whist([0.1, 0.2], [0.0, 0.0])                        # points in range, but no weight
     @test tv_distance(z, b) ≥ 0
     @test_throws ArgumentError tv_distance(z, b; weighted=true)
-    @test_throws ArgumentError tv_distance(StreamHist(integer=true, binRange=(1, 3)), b)
-    @test_throws ArgumentError StreamHist(m=0)
+    @test_throws ArgumentError tv_distance(StreamingHistogram(integer=true, binRange=(1, 3)), b)
+    @test_throws ArgumentError StreamingHistogram(m=0)
 end

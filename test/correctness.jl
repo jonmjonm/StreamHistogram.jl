@@ -1,7 +1,7 @@
-# End-to-end correctness tests: does StreamHist's output agree with
+# End-to-end correctness tests: does StreamingHistogram's output agree with
 # independently-computed ground truth (StatsBase on the raw data, known
 # analytic distribution properties, a directly-built reference Histogram, and an ASH from
-# AverageShiftedHistograms.jl, which StreamHist's own ASH must reproduce)
+# AverageShiftedHistograms.jl, which StreamingHistogram's own ASH must reproduce)
 # -- as opposed to runtests.jl's tests of the internal mechanics
 # (merge/addpoint/batchaccumulator agreement, API surface, error paths).
 
@@ -14,7 +14,7 @@ using QuadGK: quadgk
     Random.seed!(11)
     data = randn(50_000) .* 2.5 .+ 7.0
 
-    oh = StreamHist(binRange=(-20.0, 40.0), binNum=200)
+    oh = StreamingHistogram(binRange=(-20.0, 40.0), binNum=200)
     add!(oh, data)
     finalize!(oh)
 
@@ -29,7 +29,7 @@ end
     Random.seed!(12)
     data = rand(200_000)  # Uniform(0,1): mean=1/2, var=1/12, skew=0, excess kurtosis=-6/5
 
-    oh = StreamHist(binRange=(0.0, 1.0), binNum=100, momentPowers=[1, 2, 3, 4])
+    oh = StreamingHistogram(binRange=(0.0, 1.0), binNum=100, momentPowers=[1, 2, 3, 4])
     add!(oh, data)
     finalize!(oh)
 
@@ -43,7 +43,7 @@ end
     Random.seed!(13)
     data = randn(200_000)  # mean=0, var=1, skew=0, excess kurtosis=0
 
-    oh = StreamHist(binRange=(-6.0, 6.0), binNum=300)
+    oh = StreamingHistogram(binRange=(-6.0, 6.0), binNum=300)
     add!(oh, data)
     finalize!(oh)
 
@@ -60,19 +60,19 @@ end
 
     reference = fit(Histogram, data, edges)
 
-    # Feed the same data through StreamHist three different ways: as one
+    # Feed the same data through StreamingHistogram three different ways: as one
     # batch, one point at a time, and mixed batches -- all must agree with
     # the ground-truth histogram exactly (integer bin counts), since binning
     # is deterministic regardless of how the points arrived.
-    oh_batch = StreamHist(bins=collect(edges))
+    oh_batch = StreamingHistogram(bins=collect(edges))
     add!(oh_batch, data)
 
-    oh_scalar = StreamHist(bins=collect(edges))
+    oh_scalar = StreamingHistogram(bins=collect(edges))
     for x in data
         add!(oh_scalar, x)
     end
 
-    oh_mixed = StreamHist(bins=collect(edges))
+    oh_mixed = StreamingHistogram(bins=collect(edges))
     add!(oh_mixed, data[1:10_000])
     for x in data[10_001:20_000]
         add!(oh_mixed, x)
@@ -94,7 +94,7 @@ end
 
     reference = ash(data; rng=rng, kernel=AverageShiftedHistograms.Kernels.biweight, m=5)
 
-    oh = StreamHist(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1)
+    oh = StreamingHistogram(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1)
     # mixing scalar and batch add!
     add!(oh, data[1:7])
     for x in data[8:5000]
@@ -107,8 +107,8 @@ end
     @test oh.gridCounts == reference.counts
     @test densityGrid(oh).density ≈ reference.density rtol=1e-12
     # with another kernel and smoothing width too
-    oh2 = StreamHist(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1,
-                     kernel=AverageShiftedHistograms.Kernels.gaussian, m=12)
+    oh2 = StreamingHistogram(bins=collect(-10.0:2.0:16.0), ashNGrid=length(rng) - 1,
+                            kernel=AverageShiftedHistograms.Kernels.gaussian, m=12)
     add!(oh2, data)
     ref2 = ash(data; rng=rng, kernel=AverageShiftedHistograms.Kernels.gaussian, m=12)
     @test densityGrid(oh2).density ≈ ref2.density rtol=1e-12
@@ -118,7 +118,7 @@ end
     Random.seed!(16)
     data = randn(60_000) .* 1.5 .+ 2.0
 
-    oh = StreamHist(binRange=(-8.0, 12.0), binNum=200)
+    oh = StreamingHistogram(binRange=(-8.0, 12.0), binNum=200)
     add!(oh, data)
     finalize!(oh)
 
@@ -134,7 +134,7 @@ end
     Random.seed!(19)
     data = randn(30_000) .* 2.0 .+ 4.0
 
-    oh = StreamHist(binRange=(-6.0, 14.0), binNum=100)
+    oh = StreamingHistogram(binRange=(-6.0, 14.0), binNum=100)
     add!(oh, data)
     finalize!(oh)
 
@@ -157,7 +157,7 @@ end
     μ, σ = 3.0, 1.5
     data = randn(300_000) .* σ .+ μ
 
-    oh = StreamHist(binRange=(μ - 8σ, μ + 8σ), binNum=400, m=10)
+    oh = StreamingHistogram(binRange=(μ - 8σ, μ + 8σ), binNum=400, m=10)
     add!(oh, data)
     finalize!(oh)
 
@@ -176,13 +176,13 @@ end
     # range is fixed from precisely that subset -- a single add! call with
     # a batch bigger than learnLength buffers (and learns from) the whole
     # batch at once, per the "collects until *at least* learnLength" spec.
-    oh_learn = StreamHist(learn=true, learnLength=2_000, binNum=150, paddingPct=0.0)
+    oh_learn = StreamingHistogram(learn=true, learnLength=2_000, binNum=150, paddingPct=0.0)
     add!(oh_learn, data[1:2_000])
     add!(oh_learn, data[2_001:end])
     finalize!(oh_learn)
 
     lo, hi = extrema(data[1:2_000])
-    oh_direct = StreamHist(binRange=(lo, hi), binNum=150)
+    oh_direct = StreamingHistogram(binRange=(lo, hi), binNum=150)
     add!(oh_direct, data)
     finalize!(oh_direct)
 
@@ -209,7 +209,7 @@ end
     Random.seed!(18)
     data = rand(1:20, 10_000)
 
-    oh = StreamHist(integer=true, binRange=(1, 20))
+    oh = StreamingHistogram(integer=true, binRange=(1, 20))
     add!(oh, data)
     finalize!(oh)
 
@@ -221,7 +221,7 @@ end
 end
 
 @testset "degenerate zero-variance data doesn't crash (NaN, not an error)" begin
-    oh = StreamHist(binRange=(-1.0, 1.0), binNum=10)
+    oh = StreamingHistogram(binRange=(-1.0, 1.0), binNum=10)
     add!(oh, fill(0.5, 100))
     finalize!(oh)
 

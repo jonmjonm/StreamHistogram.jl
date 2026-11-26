@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- **The type `StreamHist` is renamed `StreamingHistogram`.** There is no alias for the old name. Breaking. The
+  package and module are still `StreamHistogram`.
+
 ## 0.2.1
 
 - **`kurtosis` and `weightedKurtosis` are the excess kurtosis** (the fourth central moment over the variance

@@ -4,7 +4,7 @@ using AverageShiftedHistograms: ash, Kernels
 
 "A histogram of `xs` (with weights `ws`, if given) on the fixed range `lo..hi`."
 function rangedhist(xs, ws=nothing; lo=-5.0, hi=5.0, kw...)
-    oh = StreamHist(; learn=false, binRange=(lo, hi), binNum=40, kw...)
+    oh = StreamingHistogram(; learn=false, binRange=(lo, hi), binNum=40, kw...)
     ws === nothing ? add!(oh, xs) : add!(oh, xs, ws)
     return oh
 end
@@ -60,7 +60,7 @@ end
     @test sum(weightedHistogram(oh, edges).weights) ≈ sum(ws) rtol=1e-12
 end
 
-@testset "m= and kernel= smooth the same grid as a StreamHist built with them would" begin
+@testset "m= and kernel= smooth the same grid as a StreamingHistogram built with them would" begin
     Random.seed!(43)
     xs = randn(4000)
     ws = rand(4000)
@@ -96,38 +96,38 @@ end
 end
 
 @testset "densityCdf: integer mode, the learn phase, nothing in range" begin
-    ints = StreamHist(integer=true, binRange=(1, 4))
+    ints = StreamingHistogram(integer=true, binRange=(1, 4))
     add!(ints, [1, 2, 3])
     @test_throws ArgumentError densityCdf(ints)
     @test_throws ArgumentError weightedDensityCdf(ints)
 
-    learning = StreamHist(learnLength=1000)
+    learning = StreamingHistogram(learnLength=1000)
     add!(learning, randn(10))
     @test_throws ArgumentError densityCdf(learning)
     finalize!(learning)
     @test densityCdf(learning)(Inf) ≈ 1 atol=1e-12
 
-    empty = StreamHist(binRange=(100.0, 250.0))
+    empty = StreamingHistogram(binRange=(100.0, 250.0))
     add!(empty, [838.0, 839.5])
     @test densityCdf(empty)(50.0) == 0.0
     @test isnan(densityCdf(empty)(125.0)) && isnan(densityCdf(empty)(300.0))
     @test histogram(empty, [100.0, 175.0, 250.0]).weights == [0.0, 0.0]
 
-    @test_throws ArgumentError StreamHist(ashNGrid=0)
+    @test_throws ArgumentError StreamingHistogram(ashNGrid=0)
 end
 
 @testset "the grid holds exactly the points the histogram does" begin
     lo, hi = 0.0, 1.0
     half = (hi - lo) / 500 / 2                                     # half a grid step (ashNGrid = 500)
     edge = [lo - half / 2, hi, hi + half / 2]                      # just outside, or at the top (closed=:left)
-    oh = StreamHist(binRange=(lo, hi))
+    oh = StreamingHistogram(binRange=(lo, hi))
     add!(oh, edge, [1.0, 2.0, 3.0])
     @test outofrange(oh) == (underflow=1, overflow=2)
     @test sum(oh.gridCounts) == 0 && sum(oh.gridWeights) == 0
     @test isnan(density(oh)(0.5))                                  # no point in range: no density, as histogram says
     @test histogram(oh, [lo, hi]).weights == [0.0]
 
-    right = StreamHist(binRange=(lo, hi), closed=:right)           # now lo is outside and hi inside
+    right = StreamingHistogram(binRange=(lo, hi), closed=:right)           # now lo is outside and hi inside
     add!(right, [lo, hi])
     @test outofrange(right) == (underflow=1, overflow=0)
     @test oh.grid == right.grid && right.gridCounts[end] == 1 && sum(right.gridCounts) == 1
@@ -137,7 +137,7 @@ end
     xs = 1.2 .* randn(5000)
     ws = rand(5000)
     for (bins, closed) in ((nothing, :left), (nothing, :right), ([-1.5, -0.2, 0.7, 2.0], :left))
-        a = bins === nothing ? StreamHist(binRange=(-2.0, 2.0); closed) : StreamHist(; bins, closed)
+        a = bins === nothing ? StreamingHistogram(binRange=(-2.0, 2.0); closed) : StreamingHistogram(; bins, closed)
         add!(a, xs[1:2000], ws[1:2000])
         foreach(i -> add!(a, xs[i], ws[i]), 2001:5000)
         under, over = outofrange(a)
@@ -149,7 +149,7 @@ end
 end
 
 @testset "every moment, the mean included, is NaN before any point" begin
-    oh = StreamHist(binRange=(0.0, 1.0))
+    oh = StreamingHistogram(binRange=(0.0, 1.0))
     @test isnan(mean(oh)) && isnan(variance(oh)) && isnan(std(oh)) && isnan(skewness(oh)) && isnan(kurtosis(oh))
     @test all(isnan, values(moments(oh))) && all(p -> isnan(moment(oh, p)), oh.momentPowers)
     @test isnan(weightedMean(oh)) && all(isnan, values(weightedMoments(oh)))
@@ -158,7 +158,7 @@ end
     add!(oh, 0.25)
     @test mean(oh) == 0.25 && variance(oh) == 0.0
     # a point of weight 0 counts, but adds no weight
-    z = StreamHist(binRange=(0.0, 1.0))
+    z = StreamingHistogram(binRange=(0.0, 1.0))
     add!(z, 0.5, 0.0)
     @test mean(z) == 0.5 && isnan(weightedMean(z))
 end
