@@ -383,5 +383,12 @@ include("weights.jl")
     end
 end
 
+@testset "nobs of the moment accumulator, and show of a StreamHist" begin
+    oh = StreamHist(binRange=(0.0, 4.0), binNum=4)
+    add!(oh, [1.0, 2.0, 3.0])
+    @test nobs(oh.moments) == 3
+    @test repr(oh) == "StreamHist(n=3, totalweight=3.0, initialized=true, integer=false)"
+end
+
 include("cdf.jl")
 include("quantile.jl")
