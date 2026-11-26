@@ -23,7 +23,7 @@ A `StreamingHistogram` keeps, updated as each point arrives:
 Each of 1, 2, 4 and 5 is kept twice: once counting every point once, and once
 counting every point by its weight.
 
-`StreamHistogram` is particularly well adapted to creating histograms from large amounts of data that can only be touched one. Hence, `StreamHistogram` begins by learning over what range the data seems to vary.
+`StreamHistogram` is particularly well adapted to creating histograms from large amounts of data that can only be touched once. Hence, `StreamHistogram` begins by learning over what range the data seems to vary.
 
 ## Installation
 

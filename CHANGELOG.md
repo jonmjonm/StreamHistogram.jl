@@ -1,12 +1,9 @@
 # Changelog
 
-## 0.3.0
+## 0.2.1
 
 - **The type `StreamHist` is renamed `StreamingHistogram`.** There is no alias for the old name. Breaking. The
   package and module are still `StreamHistogram`.
-
-## 0.2.1
-
 - **`kurtosis` and `weightedKurtosis` are the excess kurtosis** (the fourth central moment over the variance
   squared, minus 3; 0 for a normal), as `StatsBase.kurtosis`. Before, they did not subtract 3. Breaking.
 - **`cdf` and `weightedCdf` are renamed `densityCdf` and `weightedDensityCdf`**: they are the CDFs of `density`
