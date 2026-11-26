@@ -12,6 +12,9 @@ using StatsBase
 using StatsBase: Histogram
 using QuadGK
 
+# Methods of the Statistics functions of the same names, so that `using Statistics, StreamHistogram` leaves no
+# name ambiguous. Note that `std` here is the population value (no `n - 1` correction), unlike
+# `Statistics.std` of a vector, which is corrected by default.
 import Statistics: mean, std, quantile
 # Methods of the StatsBase functions of the same names, so that `using StatsBase, StreamHistogram` leaves no
 # name ambiguous. They mean what StatsBase's do: population values, and `kurtosis` is the excess kurtosis.
